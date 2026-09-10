@@ -158,3 +158,28 @@ func TestControlsAndRejection(t *testing.T) {
 		t.Fatal("accepted periodic race")
 	}
 }
+
+func TestOccupiedLineAdaptsPlacementAndArrival(t *testing.T) {
+	e, _ := racecraft.Example("over-under")
+	e.Config.Gap = 3.25
+	e.Config.Separation = 5
+	r, err := racecraft.Plan(context.Background(), e.Scene, e.Vehicle, e.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Candidates != 2 {
+		t.Fatalf("expected occupied first choice to trigger adaptation, got %d candidates", r.Candidates)
+	}
+	if r.Cars[1].Path.EntrySpeedCap >= e.Scene.EntrySpeed+e.Config.Overspeed {
+		t.Fatal("attacker failed to give room on arrival")
+	}
+	if r.Cars[1].Path.Nodes[0].Offset >= -e.Config.Separation/2 {
+		t.Fatal("attacker failed to widen placement")
+	}
+	for tm := 0.; tm < r.Duration; tm += .0023 {
+		n := r.At(tm)
+		if math.Hypot(n[0].Position.X-n[1].Position.X, n[0].Position.Y-n[1].Position.Y) < r.Cars[0].Radius+r.Cars[1].Radius+e.Config.Clearance {
+			t.Fatal("adapted plan overlaps")
+		}
+	}
+}

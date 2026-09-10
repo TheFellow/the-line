@@ -137,7 +137,10 @@ func Plan(ctx context.Context, scene track.Scene, v vehicle.Config, c Config) (R
 			}
 			s := scene
 			if car == 1 {
-				s.EntrySpeed = math.Max(1, scene.EntrySpeed+c.Overspeed)
+				s.EntrySpeed = math.Max(1, scene.EntrySpeed+c.Overspeed-variant*8)
+				if variant > 0 {
+					intent += " / give room"
+				}
 			}
 			path, e := solver.EvaluateContext(ctx, s, v, offsets, opts)
 			if e != nil {
@@ -215,6 +218,12 @@ func placements(c Config, car int, variant float64, count int) ([]solver.LineCon
 			values = []float64{-a, -a, -a, -a, -a, -a, -a}
 			intent = "Trade position at next bend"
 		}
+	}
+	// If the preferred crossing is occupied, delay B's lateral transition
+	// as well as giving a little more room. The full speed profile is reevaluated.
+	if car == 1 && (c.Scenario == "over-under" || c.Scenario == "pass-repass") {
+		f[3] += variant * .08
+		f[4] += variant * .08
 	}
 	out := make([]solver.LineControl, len(f))
 	for i := range f {
