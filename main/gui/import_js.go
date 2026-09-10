@@ -17,24 +17,27 @@ func (g *game) chooseCSV() {
 	input.Set("id", "the-line-csv-import")
 	input.Get("style").Set("display", "none")
 	document.Get("body").Call("appendChild", input)
-	var changed js.Func
+	var changed, cancelled js.Func
+	dispose := func() {
+		input.Call("remove")
+		changed.Release()
+		cancelled.Release()
+	}
 	changed = js.FuncOf(func(_ js.Value, _ []js.Value) any {
 		files := input.Get("files")
 		if files.Length() == 0 {
-			input.Call("remove")
-			changed.Release()
+			dispose()
 			return nil
 		}
 		file := files.Index(0)
 		if file.Get("size").Int() > 2<<20 {
 			g.importRequests <- csvImport{err: fmt.Errorf("CSV import is limited to 2 MiB")}
-			input.Call("remove")
-			changed.Release()
+			dispose()
 			return nil
 		}
 		name := file.Get("name").String()
 		var success, failure js.Func
-		cleanup := func() { input.Call("remove"); changed.Release(); success.Release(); failure.Release() }
+		cleanup := func() { dispose(); success.Release(); failure.Release() }
 		success = js.FuncOf(func(_ js.Value, args []js.Value) any {
 			g.importRequests <- csvImport{data: args[0].String(), name: name}
 			cleanup()
@@ -48,6 +51,8 @@ func (g *game) chooseCSV() {
 		file.Call("text").Call("then", success, failure)
 		return nil
 	})
+	cancelled = js.FuncOf(func(_ js.Value, _ []js.Value) any { dispose(); return nil })
+	input.Call("addEventListener", "cancel", cancelled)
 	input.Call("addEventListener", "change", changed)
 	input.Call("click")
 }
