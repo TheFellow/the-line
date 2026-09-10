@@ -181,3 +181,67 @@ passed. Final verification still uses all 65 envelope samples (one equivalent
 evaluation on exactly constant segments), with separate denser independent
 checks. New diagnostics describe **measured coarse-to-fine agreement**, never a
 probabilistic optimizer confidence. See [SEARCH.md](SEARCH.md) for contracts.
+
+## Once-over corrections, 2026-09-10
+
+The response to [ROADMAP_ONCE_OVER.md](../research/ROADMAP_ONCE_OVER.md) is
+tracked item by item in [ONCE_OVER_RESPONSE.md](../research/ONCE_OVER_RESPONSE.md).
+Final product commit: `9bcc6dc`.
+
+The independent axle boundary grid covers 8,000 signed limits, including load
+sensitivity, unloading, near-saturation and near-lift-off cases. The maximum
+active-constraint residual was **2.66e-11 m/s²** and maximum error against an
+independently bisected root was **3.49e-11 m/s²**. These are measured cases, not
+a universal convergence guarantee. The 40-iteration conservative fallback remains.
+
+An isolated `git archive 6620b93` supplied the five original preset optimized
+and centreline durations. `TestLegacyPresetDurations` requires bit-for-bit
+agreement with all ten numbers and passes. Three independently captured road
+hashes also anchor pre-salt study migration. Stale manual studies remain stale;
+pinned references migrate against their separately preserved source scenes.
+
+The shared `editor.SolveSetup` helper is exercised with the real solver: a rejected
+seed triggers exactly one unseeded retry and produces a verified result. Invalid
+car/road failures and cancellation do not retry. A replacement curvature envelope
+also makes a coarse baseline feasible but its refined baseline infeasible;
+that error is explicitly tested as **not** a seed failure, including a zero-budget
+solve. Seed-shape rejection retains its typed error at zero budget.
+
+The full headless browser suite passed **40 checks in each configuration, 80
+total**, with no browser errors. The plan run took 973.923 s and the elevated
+retina run took 1223.080 s. Both include wider-car fresh-line recovery and a
+failed superseding edit preserving its valid predecessor, solved scene and
+undo/redo history. The reports are
+`artifacts/once-over-browser-plan/report.json` and
+`artifacts/once-over-browser-elevated/report.json`.
+
+Visual review regenerated all **36 images** (12 presets × plan, elevated and
+perspective) under `artifacts/once-over-review/`. All four gallery sheets and
+representative full-size images were personally inspected. Current/default GT
+lines improve on their matching centreline by **2.292–13.889%**; the largest
+reported force residual is **9.1354e-7 m/s²**. These remain heuristic estimates
+under the declared quasi-static model. Road outlines, kerbs, corner markers,
+vehicle occlusion and both speed traces are legible. The speed chart now uses
+its complete comparison range while the color legend retains an absolute scale.
+
+`club-loop-animation.gif` contains **800 frames, 40 seconds at 20 FPS**, at
+960×600 in perspective view. Its decoded eight-frame contact sheet and full-size
+frames around the 19.333-second lap boundary were inspected; position, clock and
+chart cursor wrap consistently. This export demonstrates animation correctness,
+not a claim of native-window FPS. Software-rendered browser frame rates are
+likewise used for interaction correctness, not hardware performance claims.
+
+Reproduction:
+
+```sh
+go test -count=1 ./...
+go vet ./...
+make build
+CGO_ENABLED=0 go build -o bin/the-line-headless ./main/cli
+GOOS=js GOARCH=wasm go build -o artifacts/once-over-release.wasm ./main/gui
+go test -race ./pkg/solver -run 'TestIndependentFinalistsWorkerDeterminism|TestSearchCancellationAndOptions|TestEvaluate' -count=1
+node tools/browser/verify.mjs --scope=all --case=plan --artifacts=artifacts/once-over-browser-plan
+node tools/browser/verify.mjs --scope=all --case=elevated-retina --artifacts=artifacts/once-over-browser-elevated
+go run ./tools/review --out artifacts/once-over-review
+go run ./main/cli animate --preset club-loop --vehicle gt --view perspective --duration 40 --fps 20 --width 960 --height 600 --out artifacts/once-over-review/club-loop-animation.gif
+```
