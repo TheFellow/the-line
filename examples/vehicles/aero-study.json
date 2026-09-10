@@ -1,0 +1,18 @@
+{
+  "name": "Aero Study · fictional RWD",
+  "mass": 1180,
+  "power": 390000,
+  "brake": 14,
+  "max_speed": 88,
+  "grip": 1.45,
+  "drag_area": 1.1,
+  "front_weight": 0.45,
+  "front_drive": 0,
+  "width": 1.95,
+  "front_brake": 0.62,
+  "lift_area": 2.5,
+  "aero_balance": 0.45,
+  "wheelbase": 2.7,
+  "cg_height": 0.3,
+  "load_sensitivity": 0.08
+}

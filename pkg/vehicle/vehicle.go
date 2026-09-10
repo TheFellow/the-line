@@ -1,6 +1,6 @@
 // Package vehicle supplies a quasi-static friction-circle model with fixed
-// axle load and torque distributions. Presets are fictional, illustrative cars.
-// It omits load transfer, downforce, tyre slip, suspension and crest unloading.
+// torque distributions and optional axle load transfer/downforce. Presets are
+// fictional. It omits tyre slip, suspension, lateral transfer and crest unloading.
 package vehicle
 
 import (
@@ -13,7 +13,7 @@ const AirDensity = 1.225 // kg/m³
 
 // Config uses SI units: kg, watts, m/s, m/s², and CdA in square metres.
 // FrontWeight is static front normal-load fraction. FrontDrive is a fixed
-// front torque fraction; neither distribution changes with acceleration.
+// front torque fraction. Optional axle dynamics are documented in docs/VEHICLE_MODEL.md.
 type Config struct {
 	Name        string  `json:"name"`
 	Mass        float64 `json:"mass"`
@@ -25,6 +25,15 @@ type Config struct {
 	FrontWeight float64 `json:"front_weight"`
 	FrontDrive  float64 `json:"front_drive"`
 	Width       float64 `json:"width"`
+	// Zero FrontBrake retains ideal brake allocation; positive values fix the
+	// front brake fraction. This sentinel preserves existing serialized cars.
+	FrontBrake      float64 `json:"front_brake,omitempty"`
+	LiftArea        float64 `json:"lift_area,omitempty"`        // positive downforce ClA, m²
+	AeroBalance     float64 `json:"aero_balance,omitempty"`     // front downforce fraction
+	CGHeight        float64 `json:"cg_height,omitempty"`        // m; zero disables transfer
+	Wheelbase       float64 `json:"wheelbase,omitempty"`        // m; required with CGHeight
+	LoadSensitivity float64 `json:"load_sensitivity,omitempty"` // exponent [0, 0.5]
+
 }
 
 // Model can be replaced without changing track geometry or optimization.
@@ -40,7 +49,8 @@ type Model interface {
 // signed forward acceleration; Braking is maximum deceleration magnitude.
 // Either may be negative if resistance or gravity exceeds tyre capability.
 // Feasible reports lateral/load feasibility, not the sign of these bounds.
-// Utilization is absolute lateral tyre demand divided by total tyre capacity.
+// Utilization is lateral demand/capacity: combined for legacy configurations,
+// or the maximum axle ratio with optional dynamics enabled.
 type Envelope struct {
 	Acceleration, Braking, Utilization float64
 	Feasible                           bool
@@ -57,11 +67,14 @@ func (c Config) Validate() error {
 	values := []struct {
 		name      string
 		v, lo, hi float64
-	}{{"mass", c.Mass, 50, 10000}, {"power", c.Power, 1, 5e6}, {"brake", c.Brake, 0.1, 40}, {"max_speed", c.MaxSpeed, 1, 200}, {"grip", c.Grip, 0.1, 3}, {"drag_area", c.DragArea, 0, 10}, {"front_weight", c.FrontWeight, 0.01, 0.99}, {"front_drive", c.FrontDrive, 0, 1}, {"width", c.Width, 0.5, 4}}
+	}{{"mass", c.Mass, 50, 10000}, {"power", c.Power, 1, 5e6}, {"brake", c.Brake, 0.1, 40}, {"max_speed", c.MaxSpeed, 1, 200}, {"grip", c.Grip, 0.1, 3}, {"drag_area", c.DragArea, 0, 10}, {"front_weight", c.FrontWeight, 0.01, 0.99}, {"front_drive", c.FrontDrive, 0, 1}, {"width", c.Width, 0.5, 4}, {"front_brake", c.FrontBrake, 0, 1}, {"lift_area", c.LiftArea, 0, 15}, {"aero_balance", c.AeroBalance, 0, 1}, {"cg_height", c.CGHeight, 0, 2}, {"wheelbase", c.Wheelbase, 0, 8}, {"load_sensitivity", c.LoadSensitivity, 0, .5}}
 	for _, x := range values {
 		if !finite(x.v) || x.v < x.lo || x.v > x.hi {
 			return fmt.Errorf("vehicle: %s must be finite and between %g and %g", x.name, x.lo, x.hi)
 		}
+	}
+	if c.CGHeight > 0 && c.Wheelbase < .5 {
+		return fmt.Errorf("vehicle: wheelbase must be at least 0.5 m when cg_height is positive")
 	}
 	return nil
 }
@@ -81,6 +94,9 @@ func (c Config) Limits(speed, curvature, bank, grade, grip float64) Envelope {
 	}
 	if speed < 0 || grip <= 0 || c.Mass <= 0 || c.Grip <= 0 {
 		return Envelope{}
+	}
+	if c.axleDynamics() {
+		return c.axleLimits(speed, curvature, bank, grade, grip)
 	}
 	beta := bank * math.Pi / 180
 	cosGrade := 1 / math.Sqrt(1+grade*grade)

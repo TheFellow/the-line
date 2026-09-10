@@ -8,19 +8,21 @@ import "math"
 // The shape is sqrt(Capacity²-lateral²), scaled separately for the driven/braked
 // axle allocation, then clipped by Power and BrakeLimit. These are model force
 // limits, never pedal percentages. Models with a different envelope may leave
-// Available false instead of advertising an inaccurate shape.
+// Available false instead of advertising an inaccurate shape. Optional axle
+// dynamics retain an exact frozen model for the non-elliptic force shape.
 type TyreEnvelope struct {
-	Available  bool    `json:"available"`
-	Lateral    float64 `json:"lateral_mps2"`
-	Capacity   float64 `json:"capacity_mps2"`
-	Resistance float64 `json:"resistance_mps2"`
-	Drive      float64 `json:"drive_available_mps2"`
-	Brake      float64 `json:"brake_available_mps2"`
-	DriveGrip  float64 `json:"drive_grip_mps2"`
-	Power      float64 `json:"power_capacity_mps2"`
-	DriveScale float64 `json:"drive_scale"`
-	BrakeScale float64 `json:"brake_scale"`
-	BrakeLimit float64 `json:"brake_limit_mps2"`
+	axles      axleState // optional frozen axle model, excluded from JSON
+	Available  bool      `json:"available"`
+	Lateral    float64   `json:"lateral_mps2"`
+	Capacity   float64   `json:"capacity_mps2"`
+	Resistance float64   `json:"resistance_mps2"`
+	Drive      float64   `json:"drive_available_mps2"`
+	Brake      float64   `json:"brake_available_mps2"`
+	DriveGrip  float64   `json:"drive_grip_mps2"`
+	Power      float64   `json:"power_capacity_mps2"`
+	DriveScale float64   `json:"drive_scale"`
+	BrakeScale float64   `json:"brake_scale"`
+	BrakeLimit float64   `json:"brake_limit_mps2"`
 }
 
 // TyreForces is a sample of the model force balance. Combined utilization is
@@ -44,18 +46,27 @@ func (e TyreEnvelope) Forces(acceleration, speed, speedCap float64) TyreForces {
 	}
 	f.Longitudinal = acceleration + e.Resistance
 	f.Utilization = math.Hypot(f.Longitudinal, e.Lateral) / e.Capacity
+	if e.axles.enabled {
+		front, rear := e.axles.capacities(f.Longitudinal)
+		f.Capacity = front + rear
+		f.Utilization = e.axles.utilization(f.Longitudinal, e.Lateral)
+	}
 	f.Phase, f.Limit = "coast", "none"
 	if f.Longitudinal > .05 {
 		f.Phase = "drive"
 	} else if f.Longitudinal < -.05 {
 		f.Phase = "brake"
 	}
+	brakeGrip := math.Sqrt(math.Max(0, e.Capacity*e.Capacity-e.Lateral*e.Lateral)) * e.BrakeScale
+	if e.axles.enabled {
+		brakeGrip = e.axles.bound(e.Lateral, -1)
+	}
 	const tolerance = .03 // active force-bound proximity in m/s²
 	switch {
-	case speedCap > 0 && speed >= speedCap-1e-4:
+	case speedCap >= 0 && speed >= speedCap-1e-4:
 		f.Limit = "speed_cap"
 	case f.Phase == "brake" && -f.Longitudinal >= e.Brake-tolerance:
-		if e.BrakeLimit < math.Sqrt(math.Max(0, e.Capacity*e.Capacity-e.Lateral*e.Lateral))*e.BrakeScale-tolerance {
+		if e.BrakeLimit < brakeGrip-tolerance {
 			f.Limit = "brake"
 		} else {
 			f.Limit = "grip"
@@ -66,7 +77,7 @@ func (e TyreEnvelope) Forces(acceleration, speed, speedCap float64) TyreForces {
 		} else {
 			f.Limit = "grip"
 		}
-	case math.Abs(e.Lateral) >= e.Capacity-tolerance:
+	case f.Utilization >= .995: // within 0.5% of the combined/axle grip boundary
 		f.Limit = "grip"
 	}
 	return f
@@ -75,7 +86,13 @@ func (e TyreEnvelope) Forces(acceleration, speed, speedCap float64) TyreForces {
 // LongitudinalBounds returns the positive drive and braking capabilities for a
 // hypothetical lateral specific force at this sample's normal load and speed.
 func (e TyreEnvelope) LongitudinalBounds(lateral float64) (drive, brake float64) {
-	if !e.Available || math.Abs(lateral) > e.Capacity {
+	if !e.Available {
+		return 0, 0
+	}
+	if e.axles.enabled {
+		return math.Min(e.Power, e.axles.bound(lateral, 1)), math.Min(e.BrakeLimit, e.axles.bound(lateral, -1))
+	}
+	if math.Abs(lateral) > e.Capacity {
 		return 0, 0
 	}
 	residual := math.Sqrt(math.Max(0, e.Capacity*e.Capacity-lateral*lateral))
