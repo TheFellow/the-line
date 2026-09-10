@@ -22,29 +22,37 @@ import (
 )
 
 type Options struct {
+	Analysis      bool
+	Authoring     bool
 	Width, Height int
 	// View is "2d" (plan) or "3d" (an elevated orthographic projection).
-	View string
+	View                    string
+	LineColor, ChartChannel Channel
 	// Camera preserves an explicit framing; nil fits the road automatically.
-	Camera *Camera
+	Camera    *Camera
 	SetupPage int
-	Setup  bool
+	Setup     bool
+	Reference *Reference
+	Manual    bool
 }
 
 // State contains transient editor state; none of it changes the solved path.
 type State struct {
-	Selected    int
-	Playing     bool
-	Status      string
-	FPS         float64
-	FilePath    string
-	Hover       *int
-	Drag        *DragPreview
-	Comparison  bool
-	Rate        float64
-	SetupConfig *vehicle.Config
-	Sensitivity []solver.Sensitivity
-	Provisional bool
+	ManualHandles  []LineHandle
+	ManualDragging bool
+	ManualFailure  *track.Vec3
+	Selected       int
+	Playing        bool
+	Status         string
+	FPS            float64
+	FilePath       string
+	Hover          *int
+	Drag           *DragPreview
+	Comparison     bool
+	Rate           float64
+	SetupConfig    *vehicle.Config
+	Sensitivity    []solver.Sensitivity
+	Provisional    bool
 }
 
 // DragPreview is an uncommitted control position shown over the last solved road.
@@ -57,6 +65,8 @@ type point struct{ x, y float64 }
 
 // Renderer owns a cached static scene. It is not safe for concurrent calls.
 type Renderer struct {
+	perspective                      *perspectiveScene
+	markers                          []solver.Marker
 	scene                            track.Scene
 	result                           solver.Result
 	vehicle                          vehicle.Config
@@ -71,9 +81,6 @@ type Renderer struct {
 	viewport                         image.Rectangle
 	camera                           Camera
 	scale, ox, oy                    float64
-	maxSpeed                         float64
-	minSpeed                         float64
-	comparisonMax                    float64
 }
 
 var (
@@ -96,11 +103,20 @@ func New(scene track.Scene, result solver.Result, config vehicle.Config, opts Op
 	if opts.View == "" {
 		opts.View = "3d"
 	}
+	if opts.LineColor == "" {
+		opts.LineColor = SpeedChannel
+	}
+	if opts.ChartChannel == "" {
+		opts.ChartChannel = SpeedChannel
+	}
+	if !opts.LineColor.Valid() || !opts.ChartChannel.Valid() {
+		return nil, fmt.Errorf("unknown line color or chart channel")
+	}
 	if opts.Width < 640 || opts.Height < 400 || opts.Width > 8192 || opts.Height > 8192 {
 		return nil, fmt.Errorf("render size must be between 640x400 and 8192x8192")
 	}
-	if opts.View != "2d" && opts.View != "3d" {
-		return nil, fmt.Errorf("view must be 2d or 3d")
+	if opts.View != "2d" && opts.View != "3d" && opts.View != "perspective" {
+		return nil, fmt.Errorf("view must be 2d, 3d or perspective")
 	}
 	if len(result.Road) < 2 || len(result.Nodes) < 2 {
 		return nil, fmt.Errorf("render requires a solved road")
@@ -132,17 +148,13 @@ func New(scene track.Scene, result solver.Result, config vehicle.Config, opts Op
 			return nil, err
 		}
 	}
-	r.viewport = image.Rect(28, 150, opts.Width-356, 610)
+	r.viewport = image.Rect(28, 150, opts.Width-356, 565)
 	if opts.Camera == nil {
 		r.fit()
 	} else if err := r.setCamera(*opts.Camera); err != nil {
 		return nil, err
 	}
-	r.minSpeed = math.Inf(1)
-	for _, n := range result.Nodes {
-		r.minSpeed = math.Min(r.minSpeed, n.Speed)
-		r.maxSpeed = math.Max(r.maxSpeed, n.Speed)
-	}
+	r.markers = solver.DetectMarkers(result.Nodes)
 	r.drawBase()
 	return r, nil
 }
@@ -157,6 +169,9 @@ func (r *Renderer) Controls() map[string]image.Rectangle {
 }
 
 func (r *Renderer) projected(p track.Vec3) point {
+	if r.opts.View == "perspective" {
+		return r.perspectivePoint(p)
+	}
 	q := r.raw(p)
 	return point{q.x*r.scale + r.ox, q.y*r.scale + r.oy}
 }
@@ -175,34 +190,47 @@ func (r *Renderer) Frame(t float64) image.Image {
 func (r *Renderer) FrameWithState(t float64, state State) image.Image {
 	copy(r.frame.Pix, r.base.Pix)
 	im := r.frame
-	t = math.Max(0, math.Min(t, r.PlaybackDuration(state.Comparison)))
-	n := r.result.At(t)
+	t = r.frameTime(t, state)
+	n := r.frameNode(t, state)
+	playheadTime := t
+	if r.result.Closed {
+		playheadTime = n.Time
+	}
 	roadImage := im.SubImage(r.viewport).(*image.RGBA)
 	selected := state.Selected
-	if selected >= 0 && selected < len(r.scene.Points) {
+	if r.opts.View != "perspective" && !r.opts.Analysis && !r.opts.Manual && selected >= 0 && selected < len(r.scene.Points) {
 		p := r.scene.Points[selected]
 		q := r.projected(track.Vec3{X: p.X, Y: p.Y, Z: p.Z})
 		circle(roadImage, q, 11, color.RGBA{178, 238, 135, 35})
 		circle(roadImage, q, 6, accent)
 		circle(roadImage, q, 3, bg)
 		if !r.opts.Setup {
-			r.selection(im, selected, p)
+			if r.opts.Authoring && !r.opts.Manual {
+				r.authoringSelection(im, selected, p)
+			} else {
+				r.selection(im, selected, p)
+			}
 		}
 	}
-	if state.Comparison && len(r.result.CenterNodes) > 1 {
-		r.ghost(roadImage, t)
+	if r.opts.View == "perspective" {
+		r.perspectiveFrame(roadImage, t, n, state)
+	} else {
+		if state.Comparison && len(r.referenceNodes()) > 1 {
+			r.ghost(roadImage, t)
+		}
+		r.car(roadImage, t, n)
+		r.manualFrame(roadImage, state)
+		if state.Hover != nil && *state.Hover >= 0 && *state.Hover < len(r.scene.Points) {
+			q := r.projected(r.scene.Points[*state.Hover].Position())
+			circle(roadImage, q, 12, accent)
+			circle(roadImage, q, 9, bg)
+			circle(roadImage, q, 4, ink)
+		}
+		if state.Drag != nil {
+			r.drawDrag(roadImage, *state.Drag)
+		}
 	}
-	r.car(roadImage, t, n)
-	if state.Hover != nil && *state.Hover >= 0 && *state.Hover < len(r.scene.Points) {
-		q := r.projected(r.scene.Points[*state.Hover].Position())
-		circle(roadImage, q, 12, accent)
-		circle(roadImage, q, 9, bg)
-		circle(roadImage, q, 4, ink)
-	}
-	if state.Drag != nil {
-		r.drawDrag(roadImage, *state.Drag)
-	}
-	if r.opts.Setup {
+	if r.opts.Setup && !r.opts.Analysis {
 		r.setupFrame(im, state)
 	}
 	path := state.FilePath
@@ -215,16 +243,9 @@ func (r *Renderer) FrameWithState(t float64, state State) image.Image {
 	r.text(im, 40, y+38, fmt.Sprintf("%03.0f", n.Speed*3.6), 32, ink, true)
 	r.text(im, 111, y+36, "km/h", 13, muted, false)
 	r.text(im, 186, y, "ELAPSED", 11, muted, false)
-	r.text(im, 186, y+34, fmt.Sprintf("%05.2f", t), 26, ink, false)
+	r.text(im, 186, y+34, fmt.Sprintf("%05.2f", playheadTime), 26, ink, false)
 	r.text(im, 268, y+32, "/ "+fmt.Sprintf("%.2f s", r.PlaybackDuration(state.Comparison)), 13, muted, false)
-	r.text(im, 382, y, "LONGITUDINAL ACCELERATION", 11, muted, false)
-	col := accent
-	if n.Acceleration < -.3 {
-		col = color.RGBA{255, 145, 113, 255}
-	}
-	r.text(im, 382, y+34, fmt.Sprintf("%+.2f g", n.Acceleration/9.80665), 26, col, false)
-	r.text(im, 570, y, "PATH DISTANCE", 11, muted, false)
-	r.text(im, 570, y+34, fmt.Sprintf("%.0f m", n.S), 26, ink, false)
+	r.forceWidget(im, t, n, state)
 	play := r.controls["play"]
 	label := "PAUSE"
 	if !state.Playing {
@@ -232,17 +253,22 @@ func (r *Renderer) FrameWithState(t float64, state State) image.Image {
 	}
 	r.text(im, play.Min.X+17, play.Min.Y+23, label, 12, accent, true)
 	if state.FPS > 0 {
-		r.text(im, r.opts.Width-172, r.opts.Height-24, fmt.Sprintf("LIVE  %.0f FPS", state.FPS), 11, muted, false)
+		r.text(im, r.opts.Width-172, r.opts.Height-6, fmt.Sprintf("LIVE  %.0f FPS", state.FPS), 11, muted, false)
 	}
 	scrub := r.controls["scrub"]
-	x := float64(scrub.Min.X) + float64(scrub.Dx())*t/r.PlaybackDuration(state.Comparison)
+	x := float64(scrub.Min.X) + float64(scrub.Dx())*playheadTime/r.PlaybackDuration(state.Comparison)
 	line(im, point{float64(scrub.Min.X), float64(scrub.Min.Y + 9)}, point{x, float64(scrub.Min.Y + 9)}, 3, accent)
 	circle(im, point{x, float64(scrub.Min.Y + 9)}, 5, ink)
 	r.comparisonFrame(im, t, n, state)
+	r.presentationFrame(im, n)
 	if state.Status != "" {
-		r.text(im, 40, r.opts.Height-24, truncate(state.Status, 92), 12, color.RGBA{237, 189, 127, 255}, false)
+		r.text(im, 40, r.opts.Height-6, truncate(state.Status, 92), 12, color.RGBA{237, 189, 127, 255}, false)
 	} else {
-		r.text(im, 40, r.opts.Height-24, "SPACE  play / pause     TAB  change view     Drag a numbered handle; release to apply", 12, muted, false)
+		hint := "SPACE  play / pause     TAB  change view     Drag a numbered handle; release to apply"
+		if r.opts.View == "perspective" {
+			hint = "SPACE play / pause    , / . frame step    SHIFT + , / . station step    TAB return to edit"
+		}
+		r.text(im, 40, r.opts.Height-6, hint, 12, muted, false)
 	}
 	if r.output.Bounds() == im.Bounds() {
 		return im
@@ -268,17 +294,26 @@ func (r *Renderer) drawBase() {
 	r.text(im, 192, 43, "/  RACING GEOMETRY STUDIO", 12, muted, false)
 	r.text(im, 35, 71, "Explore the corner. Find the flow.", 12, muted, false)
 	r.text(im, w-312, 40, "LOCAL TIME SEARCH", 11, accent, true)
-	r.text(im, w-312, 62, "3D road · friction envelope · open sequence", 11, muted, false)
+	topology := "open sequence"
+	if r.result.Closed {
+		topology = "continuous lap"
+	}
+	r.text(im, w-312, 62, "3D road · friction envelope · "+topology, 11, muted, false)
 	line(im, point{28, 83}, point{float64(w - 28), 83}, 1, faint)
 	r.text(im, 42, 119, r.scene.Name, 22, ink, true)
 	view := "ELEVATED / 3D"
+	if r.opts.View == "perspective" {
+		view = "TRACKSIDE / PERSPECTIVE"
+	}
 	if r.opts.View == "2d" {
 		view = "PLAN / 2D"
 	}
 	r.text(im, 43, 142, view+"    ·    "+fmt.Sprintf("line %.0f m", r.result.Length), 11, muted, false)
 	r.drawRoad(im)
+	r.instrumentationBase(im)
 	r.comparisonBase(im)
 	r.sidebar(im)
+	r.studyButtons(im)
 	fill(im, image.Rect(0, h-116, w, h), color.RGBA{18, 25, 34, 255})
 	line(im, point{0, float64(h - 116)}, point{float64(w), float64(h - 116)}, 1, faint)
 	r.controls["scrub"] = image.Rect(40, h-129, w-355, h-111)
@@ -287,9 +322,14 @@ func (r *Renderer) drawBase() {
 	r.button(im, "restart", image.Rect(w-187, h-89, w-42, h-51), "RESTART", false)
 	r.button(im, "comparison", image.Rect(736, h-87, 897, h-53), "", false)
 	r.button(im, "rate", image.Rect(908, h-87, 1039, h-53), "", false)
+	r.presentationBase(im)
 }
 
 func (r *Renderer) drawRoad(im *image.RGBA) {
+	if r.opts.View == "perspective" {
+		r.perspectiveRoad(im)
+		return
+	}
 	im = im.SubImage(r.viewport).(*image.RGBA)
 	road := r.result.Road
 	if r.opts.View == "3d" {
@@ -298,7 +338,7 @@ func (r *Renderer) drawRoad(im *image.RGBA) {
 		for i := 1; i < len(road); i++ {
 			a, b := road[i-1], road[i]
 			var footprint []point
-			for _, p := range []track.Vec3{a.AtOffset(-a.Width/2 - 2), a.AtOffset(a.Width/2 + 2), b.AtOffset(b.Width/2 + 2), b.AtOffset(-b.Width/2 - 2)} {
+			for _, p := range []track.Vec3{a.AtOffset(-a.RightWidth() - a.KerbRight.Width - 2), a.AtOffset(a.LeftWidth() + a.KerbLeft.Width + 2), b.AtOffset(b.LeftWidth() + b.KerbLeft.Width + 2), b.AtOffset(-b.RightWidth() - b.KerbRight.Width - 2)} {
 				p.Z = 0
 				footprint = append(footprint, r.projected(p))
 			}
@@ -324,7 +364,7 @@ func (r *Renderer) drawRoad(im *image.RGBA) {
 	// Low, offset shadow separates raised road from the terrain.
 	for i := 1; i < len(road); i++ {
 		a, b := road[i-1], road[i]
-		p := []point{r.projected(a.AtOffset(-a.Width/2 - 1.4)), r.projected(a.AtOffset(a.Width/2 + 1.4)), r.projected(b.AtOffset(b.Width/2 + 1.4)), r.projected(b.AtOffset(-b.Width/2 - 1.4))}
+		p := []point{r.projected(a.AtOffset(-a.RightWidth() - a.KerbRight.Width - 1.4)), r.projected(a.AtOffset(a.LeftWidth() + a.KerbLeft.Width + 1.4)), r.projected(b.AtOffset(b.LeftWidth() + b.KerbLeft.Width + 1.4)), r.projected(b.AtOffset(-b.RightWidth() - b.KerbRight.Width - 1.4))}
 		for j := range p {
 			p[j].y += 8
 		}
@@ -340,8 +380,8 @@ func (r *Renderer) drawRoad(im *image.RGBA) {
 	})
 	for _, i := range order {
 		a, b := road[i-1], road[i]
-		al, ar := r.projected(a.AtOffset(a.Width/2)), r.projected(a.AtOffset(-a.Width/2))
-		bl, br := r.projected(b.AtOffset(b.Width/2)), r.projected(b.AtOffset(-b.Width/2))
+		al, ar := r.projected(a.AtOffset(a.LeftLimit())), r.projected(a.AtOffset(-a.RightLimit()))
+		bl, br := r.projected(b.AtOffset(b.LeftLimit())), r.projected(b.AtOffset(-b.RightLimit()))
 		col := color.RGBA{65, 75, 80, 255}
 		switch a.Surface {
 		case "gravel":
@@ -355,14 +395,7 @@ func (r *Renderer) drawRoad(im *image.RGBA) {
 		}
 		polygon(im, []point{al, ar, bl}, col)
 		polygon(im, []point{ar, br, bl}, col)
-		// Exterior alternating curbs describe the actual banked ribbon.
-		curb := color.RGBA{218, 221, 205, 255}
-		if int(a.S/4)%2 == 0 {
-			curb = color.RGBA{190, 96, 81, 255}
-		}
-		for _, side := range []float64{-1, 1} {
-			polygon(im, []point{r.projected(a.AtOffset(side * a.Width / 2)), r.projected(b.AtOffset(side * b.Width / 2)), r.projected(b.AtOffset(side * (b.Width/2 + .65))), r.projected(a.AtOffset(side * (a.Width/2 + .65)))}, curb)
-		}
+		r.drawKerbs(im, a, b)
 		line(im, al, bl, 1.1, color.RGBA{238, 235, 213, 210})
 		line(im, ar, br, 1.1, color.RGBA{238, 235, 213, 210})
 		if int(a.S/5)%2 == 0 {
@@ -375,13 +408,14 @@ func (r *Renderer) drawRoad(im *image.RGBA) {
 	}
 	for i := 1; i < len(r.result.Nodes); i++ {
 		a, b := r.result.Nodes[i-1], r.result.Nodes[i]
-		line(im, r.projected(a.Position), r.projected(b.Position), 2.8, speedColor(((a.Speed+b.Speed)/2-r.minSpeed)/math.Max(r.maxSpeed-r.minSpeed, 1)))
+		line(im, r.projected(a.Position), r.projected(b.Position), 2.8, r.opts.LineColor.color(b))
 	}
+	r.roadMarkers(im)
 	for _, idx := range []int{0, len(road) - 1} {
 		s := road[idx]
 		for j := 0; j < 10; j++ {
-			a := -s.Width/2 + float64(j)*s.Width/10
-			b := a + s.Width/10
+			a := -s.RightLimit() + float64(j)*(s.LeftLimit()+s.RightLimit())/10
+			b := a + (s.LeftLimit()+s.RightLimit())/10
 			col := ink
 			if j%2 == 1 {
 				col = bg
@@ -389,16 +423,22 @@ func (r *Renderer) drawRoad(im *image.RGBA) {
 			line(im, r.projected(s.AtOffset(a)), r.projected(s.AtOffset(b)), 4, col)
 		}
 	}
-	for i, p := range r.scene.Points {
-		q := r.projected(track.Vec3{X: p.X, Y: p.Y, Z: p.Z})
-		circle(im, q, 7, bg)
-		circle(im, q, 5, ink)
-		circle(im, q, 3, panel)
-		r.text(im, int(q.x)+11, int(q.y)-10, fmt.Sprintf("%02d", i+1), 12, ink, true)
+	if !r.opts.Manual {
+		for i, p := range r.scene.Points {
+			q := r.projected(track.Vec3{X: p.X, Y: p.Y, Z: p.Z})
+			circle(im, q, 7, bg)
+			circle(im, q, 5, ink)
+			circle(im, q, 3, panel)
+			r.text(im, int(q.x)+11, int(q.y)-10, fmt.Sprintf("%02d", i+1), 12, ink, true)
+		}
 	}
 	start, end := r.projected(road[0].Position), r.projected(road[len(road)-1].Position)
-	r.text(im, int(start.x)+13, int(start.y)+25, "IN", 11, accent, true)
-	r.text(im, int(end.x)+13, int(end.y)+25, "OUT", 11, accent, true)
+	if r.result.Closed {
+		r.text(im, int(start.x)+13, int(start.y)+25, "START / FINISH", 11, accent, true)
+	} else {
+		r.text(im, int(start.x)+13, int(start.y)+25, "IN", 11, accent, true)
+		r.text(im, int(end.x)+13, int(end.y)+25, "OUT", 11, accent, true)
+	}
 }
 
 func (r *Renderer) drawDrag(im *image.RGBA, preview DragPreview) {
@@ -417,7 +457,7 @@ func (r *Renderer) drawDrag(im *image.RGBA, preview DragPreview) {
 		for i := 1; i < len(road); i++ {
 			for _, side := range []float64{-1, 1} {
 				a, b := road[i-1], road[i]
-				line(im, r.projected(a.AtOffset(side*a.Width/2)), r.projected(b.AtOffset(side*b.Width/2)), 2, col)
+				line(im, r.projected(a.AtOffset(a.EdgeOffset(side))), r.projected(b.AtOffset(b.EdgeOffset(side))), 2, col)
 			}
 		}
 	}
@@ -442,7 +482,12 @@ func (r *Renderer) drawDrag(im *image.RGBA, preview DragPreview) {
 func (r *Renderer) sidebar(im *image.RGBA) {
 	x := r.opts.Width - 304
 	r.text(im, x, 115, "SEQUENCE", 11, muted, true)
-	r.button(im, "preset", image.Rect(x, 130, x+280, 165), "NEXT SCENE  →", false)
+	r.button(im, "preset", image.Rect(x, 130, x+155, 165), "NEXT SCENE →", false)
+	label := "OPEN ROAD"
+	if r.scene.Closed {
+		label = "CLOSED LAP"
+	}
+	r.button(im, "closed", image.Rect(x+163, 130, x+280, 165), label, r.scene.Closed)
 	r.button(im, "new", image.Rect(x, 175, x+85, 209), "NEW", false)
 	r.button(im, "load", image.Rect(x+96, 175, x+181, 209), "LOAD", false)
 	r.button(im, "save", image.Rect(x+192, 175, x+280, 209), "SAVE", false)
@@ -463,29 +508,27 @@ func (r *Renderer) sidebar(im *image.RGBA) {
 		}
 		r.text(im, x, 298, fmt.Sprintf("%.0f kg · %.0f kW · %.0f kW/t", r.vehicle.Mass, r.vehicle.Power/1000, r.vehicle.Power/r.vehicle.Mass), 12, muted, false)
 		r.button(im, "vehicle", image.Rect(x, 312, x+280, 346), "CHANGE VEHICLE  →", false)
-		r.text(im, x, 359, fmt.Sprintf("%s · tyre grip ×%.2f · fixed axle loads", drive, r.vehicle.Grip), 11, muted, false)
+		r.text(im, x, 359, fmt.Sprintf("%s · tyre grip ×%.2f · quasi-static", drive, r.vehicle.Grip), 11, muted, false)
 		line(im, point{float64(x), 363}, point{float64(x + 280), 363}, 1, faint)
-		r.text(im, x, 388, "CONTROL POINT", 11, muted, true)
-		r.button(im, "previous", image.Rect(x+187, 372, x+229, 402), "‹", false)
-		r.button(im, "next", image.Rect(x+239, 372, x+280, 402), "›", false)
-		for i, key := range []string{"width", "bank", "height", "surface"} {
-			y := 441 + i*37
-			r.button(im, key+"-", image.Rect(x+191, y-21, x+229, y+9), "−", false)
-			r.button(im, key+"+", image.Rect(x+239, y-21, x+280, y+9), "+", false)
+		if r.opts.Manual {
+			r.manualSidebar(im)
+		} else if r.opts.Authoring {
+			r.authoringSidebar(im)
+		} else {
+			r.button(im, "authoring", image.Rect(x, 372, x+174, 402), "ROAD LIMITS →", false)
+			r.button(im, "previous", image.Rect(x+187, 372, x+229, 402), "‹", false)
+			r.button(im, "next", image.Rect(x+239, 372, x+280, 402), "›", false)
+			for i, key := range []string{"width", "bank", "height", "surface"} {
+				y := 441 + i*37
+				r.button(im, key+"-", image.Rect(x+191, y-21, x+229, y+9), "−", false)
+				r.button(im, key+"+", image.Rect(x+239, y-21, x+280, y+9), "+", false)
+			}
+			r.button(im, "add", image.Rect(x, 593, x+134, 627), "ADD POINT", false)
+			r.button(im, "delete", image.Rect(x+145, 593, x+280, 627), "DELETE", false)
+			r.button(im, "undo", image.Rect(x, 638, x+134, 672), "UNDO", false)
+			r.button(im, "redo", image.Rect(x+145, 638, x+280, 672), "REDO", false)
 		}
-		r.button(im, "add", image.Rect(x, 593, x+134, 627), "ADD POINT", false)
-		r.button(im, "delete", image.Rect(x+145, 593, x+280, 627), "DELETE", false)
-		r.button(im, "undo", image.Rect(x, 638, x+134, 672), "UNDO", false)
-		r.button(im, "redo", image.Rect(x+145, 638, x+280, 672), "REDO", false)
-		// Compact heights retain editing controls; solve summary occupies extra space.
-		if r.opts.Height >= 820 {
-			line(im, point{float64(x), 691}, point{float64(x + 280), 691}, 1, faint)
-			r.text(im, x, 707, "LINE / CENTRELINE REFERENCE", 11, muted, true)
-			r.text(im, x, 732, fmt.Sprintf("%.2f / %.2f s", r.result.Duration, r.result.CenterDuration), 22, ink, true)
-			r.text(im, x, 750, fmt.Sprintf("IN   cap %.0f · line %.0f · ref %.0f km/h", r.result.EntrySpeedCap*3.6, r.result.Nodes[0].Speed*3.6, r.result.CenterEntrySpeed*3.6), 11, muted, false)
-			r.text(im, x, 766, fmt.Sprintf("OUT cap %.0f · line %.0f · ref %.0f km/h", r.result.ExitSpeedCap*3.6, r.result.Nodes[len(r.result.Nodes)-1].Speed*3.6, r.result.CenterExitSpeed*3.6), 11, muted, false)
-			r.text(im, x, 781, "Shared caps; actual entry speeds can differ", 11, muted, false)
-		}
+		r.referenceSummary(im)
 	}
 	r.button(im, "fit", image.Rect(r.opts.Width-620, 99, r.opts.Width-500, 132), "FIT / RESET", false)
 	r.button(im, "view", image.Rect(r.opts.Width-490, 99, r.opts.Width-356, 132), "SWITCH 2D / 3D", false)
@@ -493,13 +536,16 @@ func (r *Renderer) sidebar(im *image.RGBA) {
 	if r.opts.View == "2d" {
 		hint = "Shift-drag pan · Wheel zoom · Tab for elevated orbit"
 	}
+	if r.opts.View == "perspective" {
+		hint = "Watch only · frame / station controls below · Tab to edit"
+	}
 	r.text(im, 570, 145, hint, 11, muted, false)
 }
 
 func (r *Renderer) selection(im *image.RGBA, idx int, p track.Point) {
 	x := r.opts.Width - 304
 	r.text(im, x, 414, fmt.Sprintf("Point %02d of %02d", idx+1, len(r.scene.Points)), 13, accent, false)
-	values := []string{fmt.Sprintf("Width   %.1f m", p.Width), fmt.Sprintf("Bank    %+.1f°", p.Bank), fmt.Sprintf("Height  %+.1f m", p.Z), "Surface  " + p.Surface}
+	values := []string{fmt.Sprintf("Width   %.1f m", p.LeftWidth()+p.RightWidth()), fmt.Sprintf("Bank    %+.1f°", p.Bank), fmt.Sprintf("Height  %+.1f m", p.Z), "Surface  " + p.Surface}
 	for i, v := range values {
 		r.text(im, x, 445+i*37, truncate(v, 25), 13, ink, false)
 	}
@@ -507,7 +553,11 @@ func (r *Renderer) selection(im *image.RGBA, idx int, p track.Point) {
 }
 
 func (r *Renderer) car(im *image.RGBA, t float64, n solver.Node) {
-	a, b := r.result.At(math.Max(0, math.Min(t, r.result.Duration)-.08)), r.result.At(math.Min(r.result.Duration, t+.08))
+	carTime := t
+	if !r.result.Closed {
+		carTime = math.Min(t, r.result.Duration)
+	}
+	a, b := r.currentAt(carTime-.08), r.currentAt(carTime+.08)
 	r.drawVehicle(im, n, a, b, false)
 }
 

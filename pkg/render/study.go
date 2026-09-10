@@ -120,9 +120,12 @@ func (r *Renderer) presentationBase(im *image.RGBA) {
 		r.text(im, x, 464, "Reference stale · different road", 12, referenceColor, false)
 		return
 	}
-	// The live sector and up to eleven surrounding sectors are shown in Frame.
-	r.text(im, x, 757, fmt.Sprintf("%d sectors · negative Δ is time gained", len(sectors)), 11, muted, false)
-	r.text(im, x, 776, "Live sector follows station; closed seam included", 11, muted, false)
+	// Keep nine rows visible so numerical search diagnostics have their own area.
+	r.text(im, x, 689, fmt.Sprintf("%d sectors · negative Δ is time gained", len(sectors)), 11, muted, false)
+	r.text(im, x, 706, fmt.Sprintf("%d candidates · %d fine · %d workers", r.result.Candidates, r.result.FineCandidates, r.result.SearchWorkers), 11, muted, false)
+	r.text(im, x, 723, fmt.Sprintf("Same-line coarse / fine: %+.3f%%", r.result.RefinementDifference), 11, muted, false)
+	r.button(im, "polish", image.Rect(x, 732, x+280, 757), "REFINE CURRENT LINE", false)
+	r.text(im, x, 777, truncate(r.result.Termination, 45), 11, muted, false)
 }
 func (r *Renderer) presentationFrame(im *image.RGBA, n solver.Node) {
 	// Signed, fixed ±2 second scale, independent of vehicle or sequence.
@@ -151,8 +154,8 @@ func (r *Renderer) presentationFrame(im *image.RGBA, n solver.Node) {
 			selected = i
 		}
 	}
-	start := max(0, min(selected-5, len(sectors)-11))
-	end := min(len(sectors), start+11)
+	start := max(0, min(selected-4, len(sectors)-9))
+	end := min(len(sectors), start+9)
 	x := r.opts.Width - 304
 	for i := start; i < end; i++ {
 		s := sectors[i]

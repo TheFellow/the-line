@@ -44,6 +44,13 @@ type solved struct {
 }
 
 type game struct {
+	authoringOpen        bool
+	importRequests       chan csvImport
+	reference            *render.Reference
+	referenceKey         string
+	manualMode           bool
+	manualDrag           *editor.LineDrag
+	manualFailure        *track.Vec3
 	opts                 options
 	ed                   *editor.Editor
 	solvedScene          track.Scene
@@ -54,6 +61,8 @@ type game struct {
 	replies              chan solved
 	busy                 bool
 	setupOpen            bool
+	setupPage            int
+	polishNext           int
 	customCar            *vehicle.Config
 	provisional          bool
 	cancelSolve          context.CancelFunc
@@ -147,6 +156,21 @@ func main() {
 		log.Fatal(err)
 	}
 	g := &game{opts: o, ed: ed, solvedScene: s, renderer: r, result: result, config: v, playing: true, comparison: true, rate: 1, replies: make(chan solved, 1), started: time.Now(), nextDemo: 20}
+	if err := g.syncReference(); err != nil {
+		log.Fatal(err)
+	}
+	if s.Study != nil && s.Study.Manual != nil && s.Study.Manual.RoadDigest == track.RoadDigest(s) {
+		evalOpts := solver.DefaultOptions()
+		evalOpts.Spacing = s.Study.Manual.Spacing
+		g.result, err = solver.Evaluate(s, v, s.Study.Manual.Offsets, evalOpts)
+		if err != nil {
+			log.Fatal(err)
+		}
+		g.manualMode = true
+	}
+	if err := g.rebuild(); err != nil {
+		log.Fatal(err)
+	}
 	g.texture = ebiten.NewImage(o.width, o.height)
 	attachInspection(g)
 	ebiten.SetWindowSize(o.width, o.height)
@@ -199,7 +223,12 @@ func (g *game) recordError(err error) {
 }
 
 func (g *game) rebuild() error {
-	opts := render.Options{Width: g.opts.width, Height: g.opts.height, View: g.opts.view, Setup: g.setupOpen}
+	if err := g.syncReference(); err != nil {
+		return err
+	}
+	opts := render.Options{Width: g.opts.width, Height: g.opts.height, View: g.opts.view, Setup: g.setupOpen, Authoring: g.authoringOpen, SetupPage: g.setupPage, Manual: g.manualMode, Reference: g.reference}
+	opts.LineColor, opts.ChartChannel = g.renderer.LineColorMode(), g.renderer.ChartChannel()
+	opts.Analysis = g.renderer.Analysis()
 	if !g.resetCamera || g.busy {
 		camera := g.renderer.Camera()
 		opts.Camera = &camera
@@ -218,6 +247,7 @@ func (g *game) rebuild() error {
 func (g *game) queueSolve(rollback func()) { g.startSolve(rollback, false) }
 
 func (g *game) Update() error {
+	g.updateImport()
 	defer inspectFrame(g)
 	if g.captured {
 		return ebiten.Termination
@@ -229,7 +259,7 @@ func (g *game) Update() error {
 
 	if g.playing {
 		g.clock += g.rate / 60
-		if g.clock > g.playbackDuration() {
+		if !g.result.Closed && g.clock > g.playbackDuration() {
 			g.clock = math.Mod(g.clock, g.playbackDuration())
 		}
 	}
@@ -247,8 +277,9 @@ func (g *game) Update() error {
 		g.editPath()
 		return nil
 	}
+	g.presentationKeys()
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
-		if g.drag != nil || g.scrubbing || g.charting || g.cameraDrag != nil {
+		if g.drag != nil || g.manualDrag != nil || g.scrubbing || g.charting || g.cameraDrag != nil {
 			g.cancelPointer()
 			return nil
 		}
@@ -301,7 +332,7 @@ func (g *game) Update() error {
 			key    ebiten.Key
 			action string
 		}{{ebiten.KeyArrowLeft, "move-left"}, {ebiten.KeyArrowRight, "move-right"}, {ebiten.KeyArrowUp, "move-up"}, {ebiten.KeyArrowDown, "move-down"}} {
-			if inpututil.IsKeyJustPressed(entry.key) {
+			if inpututil.IsKeyJustPressed(entry.key) && g.opts.view != "perspective" {
 				g.action(entry.action)
 			}
 		}
@@ -330,10 +361,11 @@ func (g *game) mouse() {
 
 // cancelPointer discards an incomplete gesture and waits for a fresh press.
 func (g *game) cancelPointer() {
-	if g.drag != nil || g.scrubbing || g.charting || g.cameraDrag != nil {
+	if g.drag != nil || g.manualDrag != nil || g.scrubbing || g.charting || g.cameraDrag != nil {
 		g.setStatus("Gesture cancelled")
 	}
 	g.drag = nil
+	g.manualDrag = nil
 	g.cameraDrag = nil
 	g.scrubbing = false
 	g.charting = false
@@ -354,7 +386,7 @@ func (g *game) pointer(x, y float64, pressed, held, released bool) {
 		}
 	}
 	if x < 0 || y < 0 || x >= float64(g.opts.width) || y >= float64(g.opts.height) {
-		if g.drag != nil || g.scrubbing || g.charting || g.cameraDrag != nil {
+		if g.drag != nil || g.manualDrag != nil || g.scrubbing || g.charting || g.cameraDrag != nil {
 			g.cancelPointer()
 		}
 		return
@@ -374,7 +406,7 @@ func (g *game) pointer(x, y float64, pressed, held, released bool) {
 		return
 	}
 	for key, rect := range g.renderer.Controls() {
-		if image.Pt(int(x), int(y)).In(rect) && g.drag == nil {
+		if image.Pt(int(x), int(y)).In(rect) && g.drag == nil && g.manualDrag == nil {
 			if pressed {
 				if key == "scrub" {
 					g.scrubbing = true
@@ -388,6 +420,12 @@ func (g *game) pointer(x, y float64, pressed, held, released bool) {
 			}
 			return
 		}
+	}
+	if g.opts.view == "perspective" {
+		return
+	}
+	if g.manualPointer(x, y, pressed, held, released) {
+		return
 	}
 	if g.drag == nil && !image.Pt(int(x), int(y)).In(g.renderer.RoadViewport()) {
 		return
@@ -428,6 +466,26 @@ func (g *game) scrub(x int) {
 
 // action is shared by real click/key events and deterministic verification.
 func (g *game) action(key string) {
+	if g.presentationAction(key) || g.lapAction(key) {
+		return
+	}
+	if g.opts.view == "perspective" {
+		if key == "manual" {
+			g.opts.view = "3d"
+		} else if key == "add" || key == "delete" || strings.HasPrefix(key, "move-") || strings.HasPrefix(key, "width") || strings.HasPrefix(key, "bank") || strings.HasPrefix(key, "height") || strings.HasPrefix(key, "surface") || strings.HasPrefix(key, "road:") {
+			g.setStatus("Choose Edit view to change road geometry")
+			return
+		}
+	}
+	if g.authoringAction(key) {
+		return
+	}
+	if g.instrumentationAction(key) {
+		return
+	}
+	if g.manualAction(key) {
+		return
+	}
 	if g.setupAction(key) {
 		return
 	}
@@ -466,7 +524,7 @@ func (g *game) action(key string) {
 		g.setStatus("Camera fitted to the road")
 		return
 	case "view":
-		if g.drag != nil || g.scrubbing || g.charting || g.cameraDrag != nil {
+		if g.drag != nil || g.manualDrag != nil || g.scrubbing || g.charting || g.cameraDrag != nil {
 			g.cancelPointer()
 		}
 		if g.opts.view == "3d" {
@@ -489,7 +547,7 @@ func (g *game) action(key string) {
 		g.fileDraft = g.opts.file
 		return
 	}
-	if g.drag != nil || g.cameraDrag != nil {
+	if g.drag != nil || g.manualDrag != nil || g.cameraDrag != nil {
 		g.setStatus("Release the handle to apply the edit, or press Esc to cancel")
 		return
 	}
@@ -543,7 +601,14 @@ func (g *game) action(key string) {
 			p.X = (p.X + q.X) / 2
 			p.Y = (p.Y + q.Y) / 2
 			p.Z = (p.Z + q.Z) / 2
-			p.Width = (p.Width + q.Width) / 2
+			if p.WidthLeft != 0 || p.WidthRight != 0 || q.WidthLeft != 0 || q.WidthRight != 0 {
+				p.WidthLeft, p.WidthRight = (p.LeftWidth()+q.LeftWidth())/2, (p.RightWidth()+q.RightWidth())/2
+				p.Width = 0
+			} else {
+				p.Width = (p.Width + q.Width) / 2
+			}
+			p.KerbLeft.Width = (p.KerbLeft.Width + q.KerbLeft.Width) / 2
+			p.KerbRight.Width = (p.KerbRight.Width + q.KerbRight.Width) / 2
 			p.Bank = (p.Bank + q.Bank) / 2
 		} else {
 			q := s.Points[i-1]
@@ -555,10 +620,15 @@ func (g *game) action(key string) {
 	case "delete":
 		err = g.ed.DeletePoint(i)
 	case "width-", "width+":
+		step := .5
 		if key == "width-" {
-			p.Width -= .5
+			step = -step
+		}
+		if p.WidthLeft != 0 || p.WidthRight != 0 {
+			p.WidthLeft += step / 2
+			p.WidthRight += step / 2
 		} else {
-			p.Width += .5
+			p.Width += step
 		}
 		err = g.ed.UpdatePoint(i, p)
 	case "bank-", "bank+":
@@ -606,6 +676,10 @@ func (g *game) action(key string) {
 	if err != nil {
 		g.recordError(err)
 		return
+	}
+	if key == "load" || key == "new" || key == "preset" || key == "undo" || key == "redo" {
+		loaded := g.ed.Scene()
+		g.manualMode = loaded.Study != nil && loaded.Study.Manual != nil && loaded.Study.Manual.RoadDigest == track.RoadDigest(loaded)
 	}
 	g.resetCamera = key == "load" || key == "new" || key == "preset"
 	g.queueSolve(rollback)
@@ -691,7 +765,7 @@ func (g *game) Draw(screen *ebiten.Image) {
 		status = "Editing save / load path · ENTER confirm · ESC cancel"
 	}
 	setupCar := g.ed.Vehicle()
-	state := render.State{SetupConfig: &setupCar, Sensitivity: g.sensitivity, Provisional: g.provisional, Selected: g.ed.Selected(), Playing: g.playing, Status: status, FPS: ebiten.ActualFPS(), FilePath: path, Comparison: g.comparison, Rate: g.rate}
+	state := render.State{ManualHandles: g.manualHandles(), ManualDragging: g.manualDrag != nil, ManualFailure: g.manualFailure, SetupConfig: &setupCar, Sensitivity: g.sensitivity, Provisional: g.provisional, Selected: g.ed.Selected(), Playing: g.playing, Status: status, FPS: ebiten.ActualFPS(), FilePath: path, Comparison: g.comparison, Rate: g.rate}
 	if g.hover >= 0 && !g.busy {
 		state.Hover = &g.hover
 	}

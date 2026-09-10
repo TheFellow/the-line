@@ -4,9 +4,9 @@ package editor
 
 import (
 	"fmt"
-	"github.com/TheFellow/the-line/pkg/vehicle"
 
 	"github.com/TheFellow/the-line/pkg/track"
+	"github.com/TheFellow/the-line/pkg/vehicle"
 )
 
 type snapshot struct {

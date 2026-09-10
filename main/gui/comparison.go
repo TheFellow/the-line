@@ -3,8 +3,11 @@ package main
 import "math"
 
 func (g *game) playbackDuration() float64 {
-	if g.comparison && len(g.result.CenterNodes) > 1 {
-		return math.Max(g.result.Duration, g.result.CenterDuration)
+	if g.result.Closed {
+		return g.result.Duration
+	}
+	if g.comparison && len(g.referenceTrajectory().Nodes) > 1 {
+		return math.Max(g.result.Duration, g.referenceTrajectory().Duration)
 	}
 	return g.result.Duration
 }

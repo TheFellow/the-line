@@ -13,8 +13,11 @@ var referenceColor = color.RGBA{115, 193, 225, 255}
 
 // PlaybackDuration includes the slower reference finish when its ghost is shown.
 func (r *Renderer) PlaybackDuration(comparison bool) float64 {
-	if comparison && len(r.result.CenterNodes) > 1 {
-		return math.Max(r.result.Duration, r.result.CenterDuration)
+	if r.result.Closed {
+		return r.result.Duration
+	}
+	if comparison && len(r.referenceNodes()) > 1 {
+		return math.Max(r.result.Duration, r.referenceDuration())
 	}
 	return r.result.Duration
 }
@@ -31,40 +34,29 @@ func (r *Renderer) ChartStation(x float64) float64 {
 func (r *Renderer) chartPoint(n solver.Node) point {
 	rect := r.controls["chart"]
 	first, last := r.result.Nodes[0].Station, r.result.Nodes[len(r.result.Nodes)-1].Station
-	return point{float64(rect.Min.X) + (n.Station-first)/math.Max(last-first, 1e-9)*float64(rect.Dx()), float64(rect.Max.Y) - n.Speed*3.6/r.chartMaxSpeed()*float64(rect.Dy())}
-}
-
-func (r *Renderer) chartMaxSpeed() float64 {
-	if r.comparisonMax > 0 {
-		return r.comparisonMax
-	}
-	maxSpeed := 1.0
-	for _, nodes := range [][]solver.Node{r.result.Nodes, r.result.CenterNodes} {
-		for _, n := range nodes {
-			maxSpeed = math.Max(maxSpeed, n.Speed*3.6)
-		}
-	}
-	r.comparisonMax = math.Ceil(maxSpeed/50) * 50
-	return r.comparisonMax
+	low, high, _ := r.opts.ChartChannel.scale()
+	level := math.Max(0, math.Min(1, (r.opts.ChartChannel.value(n)-low)/(high-low)))
+	return point{float64(rect.Min.X) + (n.Station-first)/math.Max(last-first, 1e-9)*float64(rect.Dx()), float64(rect.Max.Y) - level*float64(rect.Dy())}
 }
 
 func (r *Renderer) comparisonBase(im *image.RGBA) {
 	r.controls["chart"] = image.Rect(82, 646, 1078, 722)
 	rect := r.controls["chart"]
 	fill(im, image.Rect(28, 618, 1090, 754), color.RGBA{19, 28, 37, 255})
-	r.text(im, 42, 636, "SPEED / ROAD STATION", 11, muted, true)
+	r.text(im, 42, 636, r.opts.ChartChannel.label()+" / STATION", 11, muted, true)
 	line(im, point{222, 631}, point{246, 631}, 2, accent)
-	r.text(im, 252, 636, "Optimized", 11, ink, false)
+	r.text(im, 252, 636, "A · Current", 11, ink, false)
 	for x := 333; x < 357; x += 8 {
 		line(im, point{float64(x), 631}, point{float64(x + 4), 631}, 2, referenceColor)
 	}
-	r.text(im, 363, 636, "Centreline reference", 11, referenceColor, false)
-	r.text(im, 43, 749, "km/h", 11, muted, false)
-	maxSpeed := r.chartMaxSpeed()
+	r.text(im, 363, 636, "B · "+truncate(r.referenceName(), 22), 11, referenceColor, false)
+	low, high, unit := r.opts.ChartChannel.scale()
+	r.text(im, 43, 752, unit+" · drag plot to inspect", 11, muted, false)
+	r.button(im, "chart-channel", image.Rect(914, 619, 1078, 641), "PLOT: "+r.opts.ChartChannel.label(), false)
 	for j := 0; j <= 2; j++ {
 		y := rect.Max.Y - j*rect.Dy()/2
 		line(im, point{float64(rect.Min.X), float64(y)}, point{float64(rect.Max.X), float64(y)}, 1, faint)
-		r.text(im, 44, y+4, fmt.Sprintf("%.0f", float64(j)*maxSpeed/2), 11, muted, false)
+		r.text(im, 44, y+4, fmt.Sprintf("%g", low+float64(j)*(high-low)/2), 11, muted, false)
 	}
 	first, last := r.result.Nodes[0].Station, r.result.Nodes[len(r.result.Nodes)-1].Station
 	for j := 0; j <= 4; j++ {
@@ -73,8 +65,11 @@ func (r *Renderer) comparisonBase(im *image.RGBA) {
 		r.text(im, x-8, 739, fmt.Sprintf("%.0f m", first+float64(j)*(last-first)/4), 11, muted, false)
 	}
 	plot := im.SubImage(rect.Inset(-1)).(*image.RGBA)
-	for k, nodes := range [][]solver.Node{r.result.CenterNodes, r.result.Nodes} {
+	for k, nodes := range [][]solver.Node{r.referenceNodes(), r.result.Nodes} {
 		for i := 1; i < len(nodes); i++ {
+			if r.opts.ChartChannel != SpeedChannel && (!nodes[i-1].Forces.Available || !nodes[i].Forces.Available) {
+				continue
+			}
 			if k == 0 && int(r.chartPoint(nodes[i]).x/7)%2 == 0 {
 				continue
 			}
@@ -85,6 +80,7 @@ func (r *Renderer) comparisonBase(im *image.RGBA) {
 			line(plot, r.chartPoint(nodes[i-1]), r.chartPoint(nodes[i]), 2, col)
 		}
 	}
+	r.chartMarkers(im)
 }
 
 func (r *Renderer) comparisonFrame(im *image.RGBA, t float64, n solver.Node, state State) {
@@ -92,7 +88,7 @@ func (r *Renderer) comparisonFrame(im *image.RGBA, t float64, n solver.Node, sta
 	cursor := r.chartPoint(n)
 	line(im, point{cursor.x, float64(rect.Min.Y)}, point{cursor.x, float64(rect.Max.Y)}, 1, ink)
 	circle(im, cursor, 3.5, accent)
-	if center, err := r.result.CenterAtStation(n.Station); err == nil {
+	if center, err := r.referenceAtStation(n.Station); err == nil {
 		circle(im, r.chartPoint(center), 3, referenceColor)
 		delta := n.Time - center.Time
 		col := accent
@@ -101,7 +97,9 @@ func (r *Renderer) comparisonFrame(im *image.RGBA, t float64, n solver.Node, sta
 		}
 		r.text(im, 568, 636, fmt.Sprintf("%+.3f s  at same road station", delta), 13, col, true)
 	}
-	r.text(im, 922, 636, "Drag chart to inspect", 11, muted, false)
+	if !r.referenceCompatible() {
+		r.text(im, 568, 636, "Reference stale · different road", 13, referenceColor, true)
+	}
 	ghostLabel := "GHOST OFF"
 	if state.Comparison {
 		ghostLabel = "GHOST ON"
@@ -112,21 +110,24 @@ func (r *Renderer) comparisonFrame(im *image.RGBA, t float64, n solver.Node, sta
 		rate = 1
 	}
 	r.text(im, 922, r.opts.Height-65, fmt.Sprintf("SPEED %.2g×", rate), 12, ink, true)
-	if state.Comparison {
-		r.text(im, 736, r.opts.Height-41, "Ghost: shared elapsed time", 11, muted, false)
+	if state.Comparison && !r.result.Closed {
 		scrub := r.controls["scrub"]
 		finish := float64(scrub.Min.X) + float64(scrub.Dx())*r.result.Duration/r.PlaybackDuration(true)
 		line(im, point{finish, float64(scrub.Min.Y - 3)}, point{finish, float64(scrub.Max.Y)}, 1, accent)
 		r.text(im, int(finish)-80, scrub.Min.Y-7, "LINE FINISH", 11, accent, false)
-		if t >= r.result.Duration && t < r.result.CenterDuration {
+		if t >= r.result.Duration && t < r.referenceDuration() {
 			r.text(im, 735, r.opts.Height-96, "Line finished · reference running", 11, referenceColor, false)
 		}
 	}
 }
 
 func (r *Renderer) ghost(im *image.RGBA, t float64) {
-	n := r.result.CenterAt(t)
-	before := r.result.CenterAt(math.Max(0, t-.08))
-	after := r.result.CenterAt(math.Min(r.result.CenterDuration, t+.08))
+	n := r.referenceAt(t)
+	carTime := t
+	if !r.result.Closed {
+		carTime = math.Min(t, r.referenceDuration())
+	}
+	before := r.referenceAt(carTime - .08)
+	after := r.referenceAt(carTime + .08)
 	r.drawVehicle(im, n, before, after, true)
 }

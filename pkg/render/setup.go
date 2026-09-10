@@ -2,8 +2,9 @@ package render
 
 import (
 	"fmt"
-	"github.com/TheFellow/the-line/pkg/vehicle"
 	"image"
+
+	"github.com/TheFellow/the-line/pkg/vehicle"
 )
 
 // SetupPages is the number of sidebar pages. The same paging owns both

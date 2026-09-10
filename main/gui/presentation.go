@@ -1,9 +1,10 @@
 package main
 
 import (
+	"math"
+
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
-	"math"
 )
 
 func (g *game) presentationKeys() {
@@ -23,6 +24,16 @@ func (g *game) presentationKeys() {
 }
 func (g *game) presentationAction(key string) bool {
 	switch key {
+	case "polish":
+		if g.busy {
+			g.setStatus("Wait for the current refinement to finish")
+			return true
+		}
+		g.cancelPointer()
+		g.manualMode = false
+		g.polishNext = 1
+		g.startSolve(g.ed.Checkpoint(), true)
+		return true
 	case "watch":
 		g.cancelPointer()
 		if g.opts.view == "perspective" {
@@ -45,7 +56,10 @@ func (g *game) presentationAction(key string) bool {
 			direction = -1
 		}
 		if key[:5] == "frame" {
-			g.clock = math.Max(0, math.Min(g.playbackDuration(), g.currentNode().Time+direction/60))
+			g.clock = math.Max(0, g.clock+direction/60)
+			if !g.result.Closed {
+				g.clock = math.Min(g.playbackDuration(), g.clock)
+			}
 		} else {
 			n, err := g.result.AtStation(g.currentNode().Station + direction*5)
 			if err != nil {

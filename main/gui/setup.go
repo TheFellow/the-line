@@ -5,12 +5,20 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/TheFellow/the-line/pkg/render"
 	"github.com/TheFellow/the-line/pkg/solver"
 	"github.com/TheFellow/the-line/pkg/track"
 	"github.com/TheFellow/the-line/pkg/vehicle"
 )
 
 func (g *game) setupAction(key string) bool {
+	if key == "setup-page" {
+		g.setupPage = (g.setupPage + 1) % render.SetupPages()
+		if err := g.rebuild(); err != nil {
+			g.recordError(err)
+		}
+		return true
+	}
 	if key == "vehicle" {
 		g.cycleVehicle()
 		return true
@@ -57,6 +65,9 @@ func (g *game) setupAction(key string) bool {
 				if strings.HasSuffix(key, "-") {
 					step = -step
 				}
+				if field.Key == "front_brake" && value == 0 && step > 0 {
+					step = .5 // Start a fixed bias at balanced braking.
+				}
 				car, err = car.With(field.Key, value+step)
 				car.Name = "Custom · " + g.ed.Scene().Vehicle
 				break
@@ -79,6 +90,15 @@ func (g *game) setupAction(key string) bool {
 }
 
 func (g *game) startSolve(rollback func(), progressive bool) {
+	sceneNow := g.ed.Scene()
+	if g.manualMode && (sceneNow.Study == nil || sceneNow.Study.Manual == nil || sceneNow.Study.Manual.RoadDigest != track.RoadDigest(sceneNow)) {
+		g.manualMode = false
+		g.manualFailure = nil
+	}
+	if g.manualMode && sceneNow.Study != nil && sceneNow.Study.Manual != nil && sceneNow.Study.Manual.RoadDigest == track.RoadDigest(sceneNow) {
+		g.evaluateManual(rollback, sceneNow.Study.Manual.Offsets)
+		return
+	}
 	if g.cancelSolve != nil {
 		g.cancelSolve()
 	}
@@ -97,6 +117,8 @@ func (g *game) startSolve(rollback func(), progressive bool) {
 	ctx, cancel := context.WithCancel(context.Background())
 	g.cancelSolve = cancel
 	scene, config, current := g.ed.Scene(), g.ed.Vehicle(), g.result
+	polish := g.polishNext
+	g.polishNext = 0
 	g.setStatus("Computing a feasible line… playback continues")
 	send := func(reply solved) bool {
 		reply.generation = generation
@@ -109,6 +131,7 @@ func (g *game) startSolve(rollback func(), progressive bool) {
 	}
 	go func() {
 		opts := solver.DefaultOptions()
+		opts.Polish = polish
 		var provisional *solver.Result
 		if progressive {
 			evalOpts := opts
@@ -135,7 +158,12 @@ func (g *game) startSolve(rollback func(), progressive bool) {
 		}
 		r, err := solver.SolveContext(ctx, scene, config, opts)
 		if provisional != nil && (err != nil || r.Duration > provisional.Duration) && ctx.Err() == nil {
+			search := r
 			r = *provisional
+			r.Candidates = search.Candidates
+			r.FineCandidates = search.FineCandidates
+			r.SearchWorkers = search.SearchWorkers
+			r.PolishCandidates = search.PolishCandidates
 			r.Termination = "retained faster verified current line"
 			err = nil
 		}
@@ -169,6 +197,7 @@ func (g *game) acceptReplies() error {
 				if err := g.rebuild(); err != nil {
 					return err
 				}
+				g.markManualFailure(reply.err)
 				g.recordError(fmt.Errorf("edit reverted: %w", reply.err))
 				g.rollback = nil
 				continue
@@ -187,8 +216,9 @@ func (g *game) acceptReplies() error {
 			}
 			if reply.provisional {
 				g.setStatus("Provisional · current line with new setup; refining…")
+				return nil
 			} else {
-				g.setStatus(fmt.Sprintf("Solved · %.2f s · %.2f s faster than centreline", g.result.Duration, g.result.CenterDuration-g.result.Duration))
+				g.setStatus(fmt.Sprintf("Solved · %.2f s · %+.2f s versus centreline", g.result.Duration, g.result.Duration-g.result.CenterDuration))
 				g.rollback = nil
 				g.resetCamera = false
 				if g.setupOpen {

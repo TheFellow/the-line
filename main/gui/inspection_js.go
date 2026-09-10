@@ -75,12 +75,51 @@ func inspectFrame(g *game) {
 		p := g.drag.Position(g.renderer, g.pointerX, g.pointerY)
 		preview = &p
 	}
-	current := g.result.At(g.clock)
-	center, _ := g.result.CenterAtStation(current.Station)
+	current := g.currentNode()
+	center, _ := g.referenceTrajectory().AtStation(current.Station)
 	viewport := g.renderer.RoadViewport()
 	end := g.result.Nodes[len(g.result.Nodes)-1]
-	centerEnd := g.result.CenterAt(math.Inf(1))
+	centerEnd := g.referenceTrajectory().At(math.Inf(1))
+	handles := g.manualHandles()
+	manualPoints := make([][2]float64, len(handles))
+	manualAxes := make([][2]float64, len(handles))
+	manualControls := g.manualControls()
+	for i, h := range handles {
+		manualPoints[i] = project(h.Position)
+		q := project(g.result.Road[manualControls[i].Index].AtOffset(h.Offset + 1))
+		manualAxes[i] = [2]float64{q[0] - manualPoints[i][0], q[1] - manualPoints[i][1]}
+	}
+	referenceName := "Centreline"
+	referenceStale := false
+	referenceDigest := track.RoadDigest(g.solvedScene)
+	if g.reference != nil {
+		referenceName = g.reference.Name
+		referenceStale = !g.reference.Compatible(g.solvedScene)
+		referenceDigest = g.reference.RoadDigest
+	}
 	data := struct {
+		PolishCandidates  int                  `json:"polishCandidates"`
+		Analysis          bool                 `json:"analysis"`
+		Sectors           []render.Sector      `json:"sectors"`
+		Closed            bool                 `json:"closed"`
+		StartNode         solver.Node          `json:"startNode"`
+		SetupPage         int                  `json:"setupPage"`
+		AuthoringOpen     bool                 `json:"authoringOpen"`
+		LineColor         string               `json:"lineColor"`
+		ChartChannel      string               `json:"chartChannel"`
+		Markers           []solver.Marker      `json:"markers"`
+		ForceCursor       [2]float64           `json:"forceCursor"`
+		ChartCursor       [2]float64           `json:"chartCursor"`
+		ManualFailure     *track.Vec3          `json:"manualFailure"`
+		ManualAxes        [][2]float64         `json:"manualAxes"`
+		ManualMode        bool                 `json:"manualMode"`
+		ManualDragging    bool                 `json:"manualDragging"`
+		ManualHandles     []render.LineHandle  `json:"manualHandles"`
+		ManualPoints      [][2]float64         `json:"manualPoints"`
+		ReferenceName     string               `json:"referenceName"`
+		ReferenceStale    bool                 `json:"referenceStale"`
+		ReferenceDigest   string               `json:"referenceDigest"`
+		ReferenceDuration float64              `json:"referenceDuration"`
 		SetupOpen         bool                 `json:"setupOpen"`
 		Config            vehicle.Config       `json:"config"`
 		RequestedConfig   vehicle.Config       `json:"requestedConfig"`
@@ -131,7 +170,12 @@ func inspectFrame(g *game) {
 		EndNode           solver.Node          `json:"endNode"`
 		CenterEndNode     solver.Node          `json:"centerEndNode"`
 	}{
+		Analysis: g.renderer.Analysis(), Sectors: g.renderer.Sectors(), Closed: g.result.Closed, StartNode: g.result.Nodes[0], SetupPage: g.setupPage, AuthoringOpen: g.authoringOpen,
+		LineColor: string(g.renderer.LineColorMode()), ChartChannel: string(g.renderer.ChartChannel()),
+		PolishCandidates: g.result.PolishCandidates,
+		Markers:          g.renderer.Markers(), ForceCursor: g.renderer.ForceCursorWithState(g.clock, render.State{Playing: g.playing, Comparison: g.comparison}), ChartCursor: g.renderer.ChartCursorWithState(g.clock, render.State{Playing: g.playing, Comparison: g.comparison}),
 		SetupOpen: g.setupOpen, Config: g.config, RequestedConfig: g.ed.Vehicle(), Provisional: g.provisional, Generation: g.generation, Analyzing: g.analyzing, Sensitivity: g.sensitivity,
+		ManualFailure: g.manualFailure, ManualAxes: manualAxes, ManualMode: g.manualMode, ManualDragging: g.manualDrag != nil, ManualHandles: handles, ManualPoints: manualPoints, ReferenceName: referenceName, ReferenceStale: referenceStale, ReferenceDigest: referenceDigest, ReferenceDuration: g.referenceTrajectory().Duration,
 		Scene: g.ed.Scene(), SolvedScene: g.solvedScene, View: g.opts.view,
 		Width: g.opts.width, Height: g.opts.height, Points: points, Controls: controls,
 		Origin: project(track.Vec3{}), AxisX: project(track.Vec3{X: 1}), AxisY: project(track.Vec3{Y: 1}),
@@ -141,7 +185,7 @@ func inspectFrame(g *game) {
 		ForceResidual: g.result.MaxForceResidual, Updates: g.frame,
 		Camera: g.renderer.Camera(), CameraDragging: g.cameraDrag != nil, Charting: g.charting,
 		Comparison: g.comparison, Rate: g.rate, PlaybackDuration: g.playbackDuration(), CenterDuration: g.result.CenterDuration,
-		Current: current, CenterCurrent: g.result.CenterAt(g.clock), SameStationCenter: center, Delta: current.Time - center.Time,
+		Current: current, CenterCurrent: g.referenceTrajectory().LapAt(g.clock), SameStationCenter: center, Delta: current.Time - center.Time,
 		RoadViewport: [4]int{viewport.Min.X, viewport.Min.Y, viewport.Max.X, viewport.Max.Y}, SolveRequests: g.solveRequests,
 		StationBounds: [2]float64{g.result.Nodes[0].Station, end.Station}, EndNode: end, CenterEndNode: centerEnd,
 	}

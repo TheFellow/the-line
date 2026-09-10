@@ -14,7 +14,7 @@ import (
 // writeComparisonCSV aligns both profiles at the current trajectory's road
 // stations; path distance and time remain independent for each car.
 func writeComparisonCSV(w io.Writer, scene track.Scene, current solver.Result) error {
-	reference := solver.Result{Nodes: current.CenterNodes, Duration: current.CenterDuration}
+	reference := current.CenterTrajectory()
 	if scene.Study != nil && scene.Study.Reference != nil {
 		ref, err := render.RestoreReference(scene.Study.Reference)
 		if err != nil {

@@ -40,7 +40,7 @@ func (g *game) referenceTrajectory() solver.Result {
 		}
 		return g.reference.Trajectory
 	}
-	return solver.Result{Nodes: g.result.CenterNodes, Duration: g.result.CenterDuration}
+	return g.result.CenterTrajectory()
 }
 
 func (g *game) manualControls() []solver.LineControl {
@@ -60,8 +60,15 @@ func (g *game) manualHandles() []render.LineHandle {
 	if g.manualDrag != nil {
 		controls[g.manualDrag.Control].Offset = g.manualDrag.Offset(g.pointerX, g.pointerY)
 	}
-	handles := make([]render.LineHandle, len(controls))
+	count := len(controls)
+	if len(g.result.Road) > 0 && g.result.Road[0].Closed {
+		count-- // One visible handle owns both endpoints of a periodic line.
+	}
+	handles := make([]render.LineHandle, count)
 	for i, c := range controls {
+		if i == count {
+			break
+		}
 		handles[i] = render.LineHandle{Index: i, Position: g.result.Road[c.Index].AtOffset(c.Offset), Offset: c.Offset, Station: g.result.Road[c.Index].S}
 	}
 	return handles
@@ -212,6 +219,9 @@ func (g *game) manualPointer(x, y float64, pressed, held, released bool) bool {
 			return true
 		}
 		controls[drag.Control].Offset = offset
+		if g.result.Closed {
+			controls[len(controls)-1].Offset = controls[0].Offset
+		}
 		offsets, err := solver.ManualOffsets(g.result.Road, controls, g.config.Width/2+solver.DefaultOptions().Margin)
 		if err != nil {
 			g.markManualFailure(err)

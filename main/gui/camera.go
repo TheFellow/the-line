@@ -20,7 +20,10 @@ type cameraGesture struct {
 // cameraMouse owns its gesture until release, even after leaving the road area.
 // The shared cancellation path handles focus loss, Escape and canvas departure.
 func (g *game) cameraMouse(x, y float64) bool {
-	if g.drag != nil || g.scrubbing || g.charting {
+	if g.opts.view == "perspective" {
+		return false
+	}
+	if g.drag != nil || g.manualDrag != nil || g.scrubbing || g.charting {
 		return false
 	}
 	if x < 0 || y < 0 || x >= float64(g.opts.width) || y >= float64(g.opts.height) {

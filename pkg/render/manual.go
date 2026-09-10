@@ -73,5 +73,9 @@ func (r *Renderer) referenceSummary(im *image.RGBA) {
 	}
 	r.text(im, x, 731, "B · "+truncate(name, 35), 11, referenceColor, true)
 	r.text(im, x, 752, fmt.Sprintf("%.2f s · Δ %+.3f s", r.referenceDuration(), r.result.Duration-r.referenceDuration()), 16, ink, true)
-	r.text(im, x, 776, "Speed caps; actual entry states can differ", 11, muted, false)
+	if r.result.Closed {
+		r.text(im, x, 776, "Steady laps · ghosts wrap independently", 11, muted, false)
+	} else {
+		r.text(im, x, 776, "Speed caps; actual entry states can differ", 11, muted, false)
+	}
 }

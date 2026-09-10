@@ -38,7 +38,7 @@ func (r *Renderer) referenceTrajectory() solver.Result {
 	if r.opts.Reference != nil {
 		return r.opts.Reference.Trajectory
 	}
-	return solver.Result{Nodes: r.result.CenterNodes, Duration: r.result.CenterDuration}
+	return r.result.CenterTrajectory()
 }
 func (r *Renderer) referenceName() string {
 	if r.opts.Reference != nil {
@@ -48,6 +48,9 @@ func (r *Renderer) referenceName() string {
 }
 func (r *Renderer) referenceNodes() []solver.Node { return r.referenceTrajectory().Nodes }
 func (r *Renderer) referenceAt(t float64) solver.Node {
+	if r.result.Closed {
+		return r.referenceTrajectory().LapAt(t)
+	}
 	if r.opts.Reference == nil {
 		return r.result.CenterAt(t)
 	}

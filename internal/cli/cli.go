@@ -7,7 +7,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"image/gif"
 	"image/png"
 	"io"
 	"math"
@@ -28,6 +27,7 @@ Usage: the-line <command> [flags]
 
   presets    List tracks, vehicles and surfaces
   new        Create a versioned track JSON file from a preset
+  import     Import a CSV centreline with asymmetric road widths
   validate   Validate a track and its vehicle
   solve      Optimize a sequence; export JSON or CSV telemetry
   sweep      Sweep a setup parameter on one fixed optimized line
@@ -49,6 +49,8 @@ Results are heuristic time estimates for the configured vehicle model.
 `
 
 type arguments struct {
+	line                                                   string
+	workers, polish                                        int
 	lineColor, channel                                     string
 	preset, scene, vehicle, vehicleFile, out, format, view string
 	spacing, margin, at, duration, fps                     float64
@@ -62,6 +64,9 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	command := args[0]
+	if command == "import" {
+		return runImport(args[1:], stdout, stderr)
+	}
 	if command == "sweep" {
 		return runSweep(args[1:], stdout, stderr)
 	}
@@ -91,26 +96,29 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	f.StringVar(&a.vehicle, "vehicle", "", "vehicle preset override")
 	f.StringVar(&a.vehicleFile, "vehicle-file", "", "custom vehicle JSON file")
 	f.StringVar(&a.out, "out", "", "output file")
+	f.StringVar(&a.line, "line", "auto", "line: auto (saved manual if present), optimized, or manual")
 	f.Float64Var(&a.spacing, "spacing", defaults.Spacing, "sample spacing in metres")
 	f.IntVar(&a.iterations, "iterations", defaults.Iterations, "bounded optimization iterations")
+	f.IntVar(&a.workers, "workers", 0, "fine-candidate workers; zero selects a bounded default")
+	f.IntVar(&a.polish, "polish", 0, "additional verified local refinement sweeps (0–3)")
 	f.Float64Var(&a.margin, "margin", defaults.Margin, "extra clearance beyond half vehicle width, metres")
 	if command == "solve" {
-		f.StringVar(&a.format, "format", "json", "output format: json or csv")
+		f.StringVar(&a.format, "format", "json", "output format: json, csv, or comparison-csv")
 	}
 	if command == "render" || command == "animate" {
 		f.StringVar(&a.lineColor, "color", "speed", "line color: speed, utilization, lateral_g, longitudinal_g")
 		f.StringVar(&a.channel, "channel", "speed", "chart channel: speed, utilization, lateral_g, longitudinal_g")
-		f.StringVar(&a.view, "view", "2d", "view: 2d or 3d")
+		f.StringVar(&a.view, "view", "2d", "view: 2d, 3d, or perspective")
 		defaultWidth, defaultHeight := 1440, 900
 		if command == "animate" {
 			defaultWidth, defaultHeight = 960, 600
 		}
 		f.IntVar(&a.width, "width", defaultWidth, "image width in pixels")
 		f.IntVar(&a.height, "height", defaultHeight, "image height in pixels")
-		f.Float64Var(&a.at, "time", 0, "start time in seconds")
+		f.Float64Var(&a.at, "time", 0, "start time in seconds; closed laps accept any nonnegative time")
 	}
 	if command == "animate" {
-		f.Float64Var(&a.duration, "duration", 0, "animation seconds; zero renders the complete sequence")
+		f.Float64Var(&a.duration, "duration", 0, "animation seconds; zero renders the remaining open sequence or one closed lap")
 		f.Float64Var(&a.fps, "fps", 20, "animation frames per second (1–50)")
 	}
 	if err := f.Parse(args[1:]); err != nil {
@@ -166,22 +174,25 @@ func Run(args []string, stdout, stderr io.Writer) error {
 			return err
 		}
 		for i, p := range road {
-			if p.Width <= config.Width+2*a.margin {
+			if p.LeftLimit() <= config.Width/2+a.margin || p.RightLimit() <= config.Width/2+a.margin {
 				return fmt.Errorf("road sample %d is too narrow for this vehicle and clearance", i)
 			}
 		}
 		fmt.Fprintf(stdout, "Valid: %s · %d controls · %d road samples · %s\n", scene.Name, len(scene.Points), len(road), config.Name)
 		return nil
 	}
-	if command == "solve" && a.format != "json" && a.format != "csv" {
-		return errors.New("--format must be json or csv")
+	if a.line != "auto" && a.line != "manual" && a.line != "optimized" {
+		return errors.New("--line must be auto, optimized, or manual")
+	}
+	if command == "solve" && a.format != "json" && a.format != "csv" && a.format != "comparison-csv" {
+		return errors.New("--format must be json, csv, or comparison-csv")
 	}
 	if command == "render" || command == "animate" {
 		if a.out == "" {
 			return fmt.Errorf("%s requires --out", command)
 		}
-		if a.view != "2d" && a.view != "3d" {
-			return errors.New("--view must be 2d or 3d")
+		if a.view != "2d" && a.view != "3d" && a.view != "perspective" {
+			return errors.New("--view must be 2d, 3d, or perspective")
 		}
 		if a.width < 800 || a.height < 600 || a.width > 3840 || a.height > 2160 {
 			return errors.New("image size must be 800–3840 by 600–2160 pixels")
@@ -193,7 +204,22 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	if command == "animate" && (!finite(a.fps) || a.fps < 1 || a.fps > 50 || !finite(a.duration) || a.duration < 0) {
 		return errors.New("animation needs finite --fps between 1 and 50 and nonnegative --duration")
 	}
-	result, err := solver.Solve(scene, config, solver.Options{Spacing: a.spacing, Iterations: a.iterations, Margin: a.margin})
+	opts := solver.Options{Spacing: a.spacing, Iterations: a.iterations, Margin: a.margin, Workers: a.workers, Polish: a.polish}
+	manual := a.line == "manual" || a.line == "auto" && scene.Study != nil && scene.Study.Manual != nil
+	var result solver.Result
+	if manual {
+		if scene.Study == nil || scene.Study.Manual == nil {
+			return errors.New("scene has no saved manual line")
+		}
+		line := scene.Study.Manual
+		if line.RoadDigest != track.RoadDigest(scene) {
+			return errors.New("manual line stale: different road; use --line optimized")
+		}
+		opts.Spacing = line.Spacing
+		result, err = solver.Evaluate(scene, config, line.Offsets, opts)
+	} else {
+		result, err = solver.Solve(scene, config, opts)
+	}
 	if err != nil {
 		return err
 	}
@@ -201,31 +227,48 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	switch command {
 	case "solve":
 		write := func(w io.Writer) error {
+			if a.format == "comparison-csv" {
+				return writeComparisonCSV(w, scene, result)
+			}
 			if a.format == "csv" {
 				return writeCSV(w, result)
 			}
 			encoder := json.NewEncoder(w)
 			encoder.SetIndent("", "  ")
+			method := "heuristic minimum-time estimate; open sequence with entry/exit speed caps"
+			if scene.Closed {
+				method = "heuristic steady-state lap estimate; periodic speed and offsets"
+			}
+			if manual {
+				method = "verified saved manual line; quasi-static time estimate"
+			}
 			return encoder.Encode(struct {
 				Scene   track.Scene    `json:"scene"`
 				Vehicle vehicle.Config `json:"vehicle"`
 				Result  solver.Result  `json:"result"`
 				Method  string         `json:"method"`
-			}{scene, config, result, "heuristic minimum-time estimate; open sequence with entry/exit speed caps"})
+			}{scene, config, result, method})
 		}
 		if a.out == "" {
 			return write(stdout)
 		}
 		return output(a.out, write)
 	case "render", "animate":
-		renderer, err := render.New(scene, result, config, render.Options{Width: a.width, Height: a.height, View: a.view, LineColor: render.Channel(a.lineColor), ChartChannel: render.Channel(a.channel)})
+		renderOpts := render.Options{Width: a.width, Height: a.height, View: a.view, LineColor: render.Channel(a.lineColor), ChartChannel: render.Channel(a.channel), Manual: manual}
+		if scene.Study != nil {
+			renderOpts.Reference, err = render.RestoreReference(scene.Study.Reference)
+			if err != nil {
+				return err
+			}
+		}
+		renderer, err := render.New(scene, result, config, renderOpts)
 		if err != nil {
 			return err
 		}
 		if command == "render" {
 			err = output(a.out, func(w io.Writer) error { return png.Encode(w, renderer.Frame(a.at)) })
 		} else {
-			err = writeAnimation(a, renderer, math.Max(result.Duration, result.CenterDuration))
+			err = writeAnimation(a, renderer, renderer.PlaybackDuration(true), scene.Closed)
 		}
 		if err != nil {
 			return err
@@ -304,33 +347,4 @@ func output(path string, write func(io.Writer) error) (err error) {
 	return os.Rename(name, path)
 }
 
-func writeAnimation(a arguments, r *render.Renderer, total float64) error {
-	duration := a.duration
-	if duration == 0 {
-		duration = total - a.at
-	}
-	if duration <= 0 {
-		return errors.New("animation starts past the end of the sequence")
-	}
-	if a.at >= total {
-		return errors.New("animation start time is outside the sequence")
-	}
-	duration = math.Min(duration, total-a.at)
-	frames := int(math.Ceil(duration * a.fps))
-	if frames > 1800 || float64(frames)*float64(a.width)*float64(a.height) > 600e6 {
-		return errors.New("animation exceeds memory budget; reduce duration, fps, or image size")
-	}
-	animation := gif.GIF{LoopCount: 0}
-	quantizer := newGIFQuantizer(r.Frame(a.at))
-	for i := 0; i < frames; i++ {
-		// GIF timing is in hundredths. Distribute rounding to preserve the clock.
-		begin := int(math.Round(float64(i) * 100 / a.fps))
-		end := int(math.Round(float64(i+1) * 100 / a.fps))
-		frame := r.Frame(a.at + float64(begin)/100)
-		p := quantizer.frame(frame)
-		animation.Image = append(animation.Image, p)
-		animation.Delay = append(animation.Delay, max(1, end-begin))
-	}
-	return output(a.out, func(w io.Writer) error { return gif.EncodeAll(w, &animation) })
-}
 func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }

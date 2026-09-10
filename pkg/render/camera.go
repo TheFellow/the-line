@@ -101,7 +101,7 @@ func (r *Renderer) fit() {
 	lo, hi := point{math.Inf(1), math.Inf(1)}, point{math.Inf(-1), math.Inf(-1)}
 	minZ, maxZ := math.Inf(1), math.Inf(-1)
 	for _, s := range r.result.Road {
-		for _, off := range []float64{-s.Width / 2, s.Width / 2} {
+		for _, off := range []float64{-s.RightWidth() - s.KerbRight.Width, s.LeftWidth() + s.KerbLeft.Width} {
 			world := s.AtOffset(off)
 			p := r.raw(world)
 			lo.x, lo.y = math.Min(lo.x, p.x), math.Min(lo.y, p.y)
@@ -134,7 +134,11 @@ func (r *Renderer) Project(p track.Vec3) (float64, float64) {
 
 // Unproject intersects a display coordinate with a constant-elevation plane.
 // The bounded elevation keeps this inverse well conditioned for handle edits.
+// Watch-only perspective has no editing inverse and returns NaN coordinates.
 func (r *Renderer) Unproject(x, y, z float64) track.Vec3 {
+	if r.opts.View == "perspective" {
+		return track.Vec3{X: math.NaN(), Y: math.NaN(), Z: math.NaN()}
+	}
 	x = (x - r.displayX) / r.displayScale
 	y = (y - r.displayY) / r.displayScale
 	return r.inverseRaw((x-r.ox)/r.scale, (y-r.oy)/r.scale, z)
