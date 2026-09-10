@@ -137,26 +137,30 @@ func (g *game) startSolve(rollback func(), progressive bool) {
 			evalOpts := opts
 			evalOpts.Spacing = current.Spacing
 			r, err := solver.EvaluateContext(ctx, scene, config, current.Offsets, evalOpts)
-			if err != nil {
-				send(solved{err: err})
+			if ctx.Err() != nil {
 				return
 			}
-			provisional = &r
-			if !send(solved{result: r, config: config, provisional: true}) {
-				return
-			}
-			road, err := track.SampleRoad(scene, opts.Spacing)
-			if err != nil {
-				send(solved{err: err})
-				return
-			}
-			opts.Seed, err = current.OffsetsAt(road)
-			if err != nil {
-				send(solved{err: err})
-				return
+			// A valid setup can invalidate the old line (a wider car is a
+			// common example). Only publish and seed from a feasible line;
+			// otherwise search the new car's available road from scratch.
+			if err == nil {
+				provisional = &r
+				if !send(solved{result: r, config: config, provisional: true}) {
+					return
+				}
+				road, sampleErr := track.SampleRoad(scene, opts.Spacing)
+				if sampleErr == nil {
+					opts.Seed, _ = current.OffsetsAt(road)
+				}
 			}
 		}
 		r, err := solver.SolveContext(ctx, scene, config, opts)
+		if err != nil && len(opts.Seed) > 0 && ctx.Err() == nil {
+			// Coarse interpolation can invalidate an otherwise verified fine
+			// line. Retry without that seed before retaining the provisional.
+			opts.Seed = nil
+			r, err = solver.SolveContext(ctx, scene, config, opts)
+		}
 		if provisional != nil && (err != nil || r.Duration > provisional.Duration) && ctx.Err() == nil {
 			search := r
 			r = *provisional
