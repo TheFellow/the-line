@@ -81,3 +81,21 @@ func TestStudyPersistsInlineSetup(t *testing.T) {
 		t.Fatal("load not undoable")
 	}
 }
+
+func TestSetupSceneCopyCannotMutateEditor(t *testing.T) {
+	scene, _ := track.Preset("esses")
+	ed, _ := New(scene)
+	car := ed.Vehicle()
+	car.Grip += .05
+	if err := ed.SetVehicle(car); err != nil {
+		t.Fatal(err)
+	}
+	copy := ed.Scene()
+	copy.VehicleConfig.Grip = 2
+	if ed.Scene().VehicleConfig.Grip != car.Grip {
+		t.Fatal("scene config pointer aliases editor")
+	}
+	if ed.Vehicle() != car {
+		t.Fatal("vehicle snapshot altered")
+	}
+}

@@ -139,6 +139,10 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	}
 	if a.vehicle != "" {
 		scene.Vehicle = a.vehicle
+		scene.VehicleConfig = nil
+	}
+	if a.vehicleFile != "" {
+		scene.VehicleConfig = &config
 	}
 	if err := config.Validate(); err != nil {
 		return err
@@ -146,9 +150,6 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	if command == "new" {
 		if a.out == "" {
 			return errors.New("new requires --out track.json")
-		}
-		if a.vehicleFile != "" {
-			return errors.New("new stores a vehicle preset; use --vehicle and pass custom --vehicle-file when solving")
 		}
 		if err := track.Save(a.out, scene); err != nil {
 			return err
