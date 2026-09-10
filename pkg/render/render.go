@@ -33,6 +33,7 @@ type State struct {
 	Playing  bool
 	Status   string
 	FPS      float64
+	FilePath string
 }
 
 type point struct{ x, y float64 }
@@ -202,6 +203,11 @@ func (r *Renderer) FrameWithState(t float64, state State) image.Image {
 		r.selection(im, selected, p)
 	}
 	r.car(im, t, n)
+	path := state.FilePath
+	if path == "" {
+		path = "scene.json"
+	}
+	r.text(im, r.opts.Width-296, 225, truncate(path, 40), 11, muted, false)
 	y := r.opts.Height - 93
 	r.text(im, 40, y, "VELOCITY", 11, muted, false)
 	r.text(im, 40, y+38, fmt.Sprintf("%03.0f", n.Speed*3.6), 32, ink, true)
@@ -302,6 +308,35 @@ func (r *Renderer) drawBase() {
 
 func (r *Renderer) drawRoad(im *image.RGBA) {
 	road := r.result.Road
+	if r.opts.View == "3d" {
+		// Ground footprints and elevation ties make height legible without a
+		// perspective camera or any distortion of the authoritative road mesh.
+		for i := 1; i < len(road); i++ {
+			a, b := road[i-1], road[i]
+			var footprint []point
+			for _, p := range []track.Vec3{a.AtOffset(-a.Width/2 - 2), a.AtOffset(a.Width/2 + 2), b.AtOffset(b.Width/2 + 2), b.AtOffset(-b.Width/2 - 2)} {
+				p.Z = 0
+				footprint = append(footprint, r.projected(p))
+			}
+			polygon(im, footprint, color.RGBA{25, 38, 40, 255})
+		}
+		for i, p := range r.scene.Points {
+			if i%3 != 2 || math.Abs(p.Z) < 2 {
+				continue
+			}
+			a := r.projected(p.Position())
+			ground := p.Position()
+			ground.Z = 0
+			b := r.projected(ground)
+			d := math.Hypot(a.x-b.x, a.y-b.y)
+			for t := 0.0; t < d; t += 7 {
+				u, v := t/d, math.Min(1, (t+3)/d)
+				line(im, point{a.x + (b.x-a.x)*u, a.y + (b.y-a.y)*u}, point{a.x + (b.x-a.x)*v, a.y + (b.y-a.y)*v}, 1, muted)
+			}
+			line(im, point{b.x - 4, b.y}, point{b.x + 4, b.y}, 1, muted)
+			r.text(im, int(b.x)+8, int(b.y)+5, fmt.Sprintf("%+.1f m", p.Z), 11, muted, false)
+		}
+	}
 	// Low, offset shadow separates raised road from the terrain.
 	for i := 1; i < len(road); i++ {
 		a, b := road[i-1], road[i]
@@ -380,7 +415,8 @@ func (r *Renderer) sidebar(im *image.RGBA) {
 	r.button(im, "new", image.Rect(x, 175, x+85, 209), "NEW", false)
 	r.button(im, "load", image.Rect(x+96, 175, x+181, 209), "LOAD", false)
 	r.button(im, "save", image.Rect(x+192, 175, x+280, 209), "SAVE", false)
-	line(im, point{float64(x), 225}, point{float64(x + 280), 225}, 1, faint)
+	r.controls["path"] = image.Rect(x, 211, x+280, 233)
+	line(im, point{float64(x), 235}, point{float64(x + 280), 235}, 1, faint)
 	r.text(im, x, 251, "VEHICLE", 11, muted, true)
 	r.text(im, x, 276, truncate(r.vehicle.Name, 28), 18, ink, true)
 	drive := "AWD"
