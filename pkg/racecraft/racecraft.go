@@ -91,11 +91,14 @@ func (c Config) Validate() error {
 }
 
 func Scene(name string) (track.Scene, error) {
-	preset := "hairpin"
-	if name == "esses-duel" {
-		preset = "esses"
+	switch name {
+	case "over-under", "pass-repass", "defend":
+		return track.Preset("hairpin")
+	case "esses-duel":
+		return track.Preset("esses")
+	default:
+		return track.Scene{}, fmt.Errorf("unknown racecraft scenario %q", name)
 	}
-	return track.Preset(preset)
 }
 
 // Plan keeps the requested starting gap and never substitutes an unsafe pair.

@@ -144,6 +144,9 @@ func TestControlsAndRejection(t *testing.T) {
 	if c.Validate() == nil {
 		t.Fatal("accepted NaN")
 	}
+	if _, err := racecraft.Scene("unknown"); err == nil {
+		t.Fatal("unknown scenario silently selected a road")
+	}
 	c = racecraft.DefaultConfig("unknown")
 	if c.Validate() == nil {
 		t.Fatal("accepted unknown scenario")
