@@ -1,4 +1,4 @@
-// Package track describes open road ribbons in metres, with z up and left turns
+// Package track describes open and periodic road ribbons in metres, with z up and left turns
 // positive. Width is horizontal; positive bank raises the left road edge.
 package track
 
@@ -9,7 +9,7 @@ import (
 	"github.com/TheFellow/the-line/pkg/vehicle"
 )
 
-const Version = 1
+const Version = 2
 
 type Vec3 struct{ X, Y, Z float64 }
 
@@ -19,25 +19,31 @@ func (v Vec3) Mul(s float64) Vec3 { return Vec3{v.X * s, v.Y * s, v.Z * s} }
 func (v Vec3) Length() float64    { return math.Sqrt(v.X*v.X + v.Y*v.Y + v.Z*v.Z) }
 
 type Point struct {
-	X       float64 `json:"x"`
-	Y       float64 `json:"y"`
-	Z       float64 `json:"z"`
-	Width   float64 `json:"width"`
-	Bank    float64 `json:"bank"`
-	Surface string  `json:"surface"`
+	X          float64 `json:"x"`
+	Y          float64 `json:"y"`
+	Z          float64 `json:"z"`
+	Width      float64 `json:"width,omitempty"` // Deprecated symmetric v1 width.
+	WidthLeft  float64 `json:"width_left,omitempty"`
+	WidthRight float64 `json:"width_right,omitempty"`
+	KerbLeft   Kerb    `json:"kerb_left,omitempty"`
+	KerbRight  Kerb    `json:"kerb_right,omitempty"`
+	Bank       float64 `json:"bank"`
+	Surface    string  `json:"surface"`
 }
 
 func (p Point) Position() Vec3 { return Vec3{p.X, p.Y, p.Z} }
 
 type Scene struct {
-	VehicleConfig *vehicle.Config `json:"vehicle_config,omitempty"`
-	Study         *Study          `json:"study,omitempty"`
-	Version       int             `json:"version"`
-	Name          string          `json:"name"`
-	Vehicle       string          `json:"vehicle"`
-	EntrySpeed    float64         `json:"entry_speed_cap"`
-	ExitSpeed     float64         `json:"exit_speed_cap"`
-	Points        []Point         `json:"points"`
+	Closed           bool            `json:"closed,omitempty"` // Periodic lap; endpoint caps do not apply.
+	KerbsCountAsRoad bool            `json:"kerbs_count_as_road,omitempty"`
+	VehicleConfig    *vehicle.Config `json:"vehicle_config,omitempty"`
+	Study            *Study          `json:"study,omitempty"`
+	Version          int             `json:"version"`
+	Name             string          `json:"name"`
+	Vehicle          string          `json:"vehicle"`
+	EntrySpeed       float64         `json:"entry_speed_cap"`
+	ExitSpeed        float64         `json:"exit_speed_cap"`
+	Points           []Point         `json:"points"`
 }
 
 type Surface struct {
@@ -70,7 +76,7 @@ func (s Scene) Validate() error {
 			return err
 		}
 	}
-	if s.Version != Version {
+	if s.Version != 1 && s.Version != Version {
 		return fmt.Errorf("track: unsupported version %d (want %d)", s.Version, Version)
 	}
 	if s.Name == "" {
@@ -83,7 +89,7 @@ func (s Scene) Validate() error {
 		return fmt.Errorf("track: speed caps must be finite and between 0 and 200 m/s")
 	}
 	for i, p := range s.Points {
-		for _, v := range []float64{p.X, p.Y, p.Z, p.Width, p.Bank} {
+		for _, v := range []float64{p.X, p.Y, p.Z, p.Width, p.WidthLeft, p.WidthRight, p.Bank} {
 			if !finite(v) {
 				return fmt.Errorf("track: point %d has a non-finite value", i)
 			}
@@ -91,8 +97,16 @@ func (s Scene) Validate() error {
 		if math.Abs(p.X) > 1e6 || math.Abs(p.Y) > 1e6 || math.Abs(p.Z) > 1e4 {
 			return fmt.Errorf("track: point %d exceeds coordinate bounds", i)
 		}
-		if p.Width < 3 || p.Width > 80 {
-			return fmt.Errorf("track: point %d width must be 3 to 80 metres", i)
+		if p.LeftWidth() < 1.5 || p.RightWidth() < 1.5 || p.LeftWidth()+p.RightWidth() > 80 {
+			return fmt.Errorf("track: point %d side widths must each be at least 1.5 m and total at most 80 metres", i)
+		}
+		if s.Version == 1 && (p.WidthLeft != 0 || p.WidthRight != 0 || p.KerbLeft.Width != 0 || p.KerbRight.Width != 0 || s.KerbsCountAsRoad) {
+			return fmt.Errorf("track: asymmetric widths and kerbs require version 2")
+		}
+		for _, k := range []Kerb{p.KerbLeft, p.KerbRight} {
+			if err := k.validate(); err != nil {
+				return fmt.Errorf("track: point %d: %w", i, err)
+			}
 		}
 		if math.Abs(p.Bank) > 35 {
 			return fmt.Errorf("track: point %d bank must be between -35 and 35 degrees", i)
@@ -111,10 +125,14 @@ func (s Scene) Validate() error {
 			}
 		}
 	}
-	return nil
+	return s.validateClosed()
 }
 
 type Sample struct {
+	Closed                      bool // The final sample duplicates the first at full lap station.
+	WidthLeft, WidthRight       float64
+	KerbLeft, KerbRight         Kerb
+	KerbsCountAsRoad            bool
 	Position, Normal            Vec3
 	S, Width, Bank, Grade, Grip float64
 	Surface                     string
@@ -125,8 +143,8 @@ func (s Sample) AtOffset(offset float64) Vec3 {
 	return s.Position.Add(s.Normal.Mul(offset)).Add(Vec3{Z: offset * math.Tan(s.Bank*math.Pi/180)})
 }
 
-// SampleRoad interpolates source points with a natural C2 cubic spline in spatial
-// chord length. Width and bank use bounded C1 interpolation in road station.
+// SampleRoad interpolates source points with a C2 cubic spline in spatial
+// chord length: natural for open sequences, periodic for closed laps. Width and bank use bounded C1 interpolation in road station.
 // Every source point remains a station, so categorical surface transitions are retained.
 // S is centreline spatial arc length; Normal and Grade use the horizontal tangent.
 func SampleRoad(scene Scene, spacing float64) ([]Sample, error) {
@@ -138,6 +156,10 @@ func SampleRoad(scene Scene, spacing float64) ([]Sample, error) {
 	}
 	p := scene.Points
 	spline := newCenterSpline(p)
+	if scene.Closed {
+		spline = newPeriodicCenterSpline(p)
+		p = append(append([]Point(nil), p...), p[0])
+	}
 	var out []Sample
 	for i := 0; i < len(p)-1; i++ {
 		a := p[i].Position()
@@ -180,7 +202,17 @@ func SampleRoad(scene Scene, spacing float64) ([]Sample, error) {
 			// C1 bank and width at knots without overshooting their input bounds.
 			u := float64(j) / float64(count)
 			blend := u * u * (3 - 2*u)
-			sample := Sample{Position: pos, Normal: Vec3{-der.Y / horizontal, der.X / horizontal, 0}, Width: p[i].Width + (p[i+1].Width-p[i].Width)*blend, Bank: p[i].Bank + (p[i+1].Bank-p[i].Bank)*blend, Grade: der.Z / horizontal, Grip: mu, Surface: surface}
+			sample := Sample{Closed: scene.Closed, Position: pos, Normal: Vec3{-der.Y / horizontal, der.X / horizontal, 0}, Width: p[i].Width + (p[i+1].Width-p[i].Width)*blend, Bank: p[i].Bank + (p[i+1].Bank-p[i].Bank)*blend, Grade: der.Z / horizontal, Grip: mu, Surface: surface}
+			sample.WidthLeft = p[i].LeftWidth() + (p[i+1].LeftWidth()-p[i].LeftWidth())*blend
+			sample.WidthRight = p[i].RightWidth() + (p[i+1].RightWidth()-p[i].RightWidth())*blend
+			sample.Width = sample.WidthLeft + sample.WidthRight
+			sample.KerbsCountAsRoad = scene.KerbsCountAsRoad
+			sample.KerbLeft, sample.KerbRight = p[i].KerbLeft, p[i].KerbRight
+			if j == count {
+				sample.KerbLeft, sample.KerbRight = p[i+1].KerbLeft, p[i+1].KerbRight
+			}
+			sample.KerbLeft.Width = p[i].KerbLeft.Width + (p[i+1].KerbLeft.Width-p[i].KerbLeft.Width)*blend
+			sample.KerbRight.Width = p[i].KerbRight.Width + (p[i+1].KerbRight.Width-p[i].KerbRight.Width)*blend
 			if len(out) > 0 {
 				last := out[len(out)-1]
 				sample.S = last.S + pos.Sub(last.Position).Length()
@@ -191,7 +223,16 @@ func SampleRoad(scene Scene, spacing float64) ([]Sample, error) {
 			}
 		}
 	}
-	if err := validateRibbon(out); err != nil {
+	if scene.Closed {
+		length := out[len(out)-1].S
+		out[len(out)-1] = out[0]
+		out[len(out)-1].S = length
+	}
+	outer := append([]Sample(nil), out...)
+	for i := range outer {
+		outer[i].KerbsCountAsRoad = true
+	}
+	if err := validateRibbon(outer); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -208,7 +249,7 @@ func validateRibbon(road []Sample) error {
 	edges := make([]edge, 0, len(road)*2)
 	for i := 0; i < len(road)-1; i++ {
 		a, b := road[i], road[i+1]
-		q := []Vec3{a.AtOffset(-a.Width / 2), b.AtOffset(-b.Width / 2), b.AtOffset(b.Width / 2), a.AtOffset(a.Width / 2)}
+		q := []Vec3{a.AtOffset(-a.RightLimit()), b.AtOffset(-b.RightLimit()), b.AtOffset(b.LeftLimit()), a.AtOffset(a.LeftLimit())}
 		for j := 0; j < 4; j++ {
 			if cross(q[j], q[(j+1)%4], q[(j+2)%4]) <= 1e-7 {
 				return fmt.Errorf("track: folded or degenerate road ribbon at station %.1f m; spread control points or reduce width", a.S)
@@ -218,7 +259,7 @@ func validateRibbon(road []Sample) error {
 	}
 	for i, a := range edges {
 		for _, b := range edges[i+1:] {
-			if abs(a.station-b.station) <= 1 {
+			if abs(a.station-b.station) <= 1 || road[0].Closed && abs(a.station-b.station) == len(road)-2 {
 				continue
 			}
 			if math.Max(a.a.X, a.b.X) < math.Min(b.a.X, b.b.X) || math.Max(b.a.X, b.b.X) < math.Min(a.a.X, a.b.X) || math.Max(a.a.Y, a.b.Y) < math.Min(b.a.Y, b.b.Y) || math.Max(b.a.Y, b.b.Y) < math.Min(a.a.Y, a.b.Y) {

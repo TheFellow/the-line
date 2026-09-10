@@ -4,7 +4,8 @@ import "math"
 
 // instrument retains exactly the road state passed to the outgoing segment
 // envelope. The final point uses incoming acceleration/state because it has no
-// outgoing segment; this is explicitly a left-sided force observation.
+// outgoing segment; this is explicitly a left-sided force observation. Closed
+// trajectories subsequently replace the repeated endpoint with the first state.
 func (e evaluator) instrument(nodes []Node, path []pathState, grades []float64) {
 	if len(nodes) < 2 {
 		return
@@ -18,9 +19,9 @@ func (e evaluator) instrument(nodes []Node, path []pathState, grades []float64) 
 			n.Acceleration = nodes[i-1].Acceleration
 		}
 		cap := e.model.Parameters().MaxSpeed
-		if i == 0 {
+		if i == 0 && !e.closed() {
 			cap = math.Min(cap, e.entry)
-		} else if i == len(nodes)-1 {
+		} else if i == len(nodes)-1 && !e.closed() {
 			cap = math.Min(cap, e.exit)
 		}
 		n.Forces = e.model.Limits(n.Speed, n.Curvature, n.Bank, n.Grade, n.Grip).Tyres.Forces(n.Acceleration, n.Speed, cap)
@@ -30,7 +31,7 @@ func (e evaluator) instrument(nodes []Node, path []pathState, grades []float64) 
 func (r Result) forceAt(n Node) Node {
 	if r.model != nil && n.Forces.Available {
 		cap := r.model.Parameters().MaxSpeed
-		if len(r.Nodes) > 0 {
+		if len(r.Nodes) > 0 && !r.Closed {
 			if n.Station == r.Nodes[0].Station {
 				cap = math.Min(cap, r.EntrySpeedCap)
 			} else if n.Station == r.Nodes[len(r.Nodes)-1].Station {

@@ -61,8 +61,13 @@ func (e evaluator) run(offset []float64) (Result, error) {
 		}
 		speeds[i] = cap * (1 - 1e-7)
 	}
-	speeds[0] = math.Min(speeds[0], e.entry)
-	speeds[n-1] = math.Min(speeds[n-1], e.exit)
+	if e.closed() {
+		speeds[0] = math.Min(speeds[0], speeds[n-1])
+		speeds[n-1] = speeds[0]
+	} else {
+		speeds[0] = math.Min(speeds[0], e.entry)
+		speeds[n-1] = math.Min(speeds[n-1], e.exit)
+	}
 	converged := false
 	resolutions := make([]int, n-1)
 	for i := range resolutions {
@@ -94,6 +99,12 @@ func (e evaluator) run(offset []float64) (Result, error) {
 				change = math.Max(change, old-lo)
 			}
 		}
+		if e.closed() {
+			old := speeds[0]
+			speeds[0] = math.Min(speeds[0], speeds[n-1])
+			speeds[n-1] = speeds[0]
+			change = math.Max(change, old-speeds[0])
+		}
 		for i := n - 2; i >= 0; i-- {
 			if i%32 == 0 {
 				if err := e.cancelled(); err != nil {
@@ -114,6 +125,12 @@ func (e evaluator) run(offset []float64) (Result, error) {
 				speeds[i] = lo
 				change = math.Max(change, old-lo)
 			}
+		}
+		if e.closed() {
+			old := speeds[n-1]
+			speeds[n-1] = math.Min(speeds[0], speeds[n-1])
+			speeds[0] = speeds[n-1]
+			change = math.Max(change, old-speeds[n-1])
 		}
 		if change < 1e-6 {
 			refine := false
@@ -170,7 +187,12 @@ func (e evaluator) run(offset []float64) (Result, error) {
 		return Result{}, fmt.Errorf("invalid traversal time")
 	}
 	e.instrument(nodes, path, grades)
-	return Result{model: e.model, Nodes: nodes, Duration: t, Length: nodes[n-1].S, MaxForceResidual: residual}, nil
+	if e.closed() {
+		end := nodes[n-1]
+		nodes[n-1] = nodes[0]
+		nodes[n-1].S, nodes[n-1].Station, nodes[n-1].Time = end.S, end.Station, end.Time
+	}
+	return Result{Closed: e.closed(), model: e.model, Nodes: nodes, Duration: t, Length: nodes[n-1].S, MaxForceResidual: residual}, nil
 }
 
 // Conservative segment envelope uses the lowest capacities across the represented

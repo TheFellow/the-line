@@ -51,9 +51,12 @@ func EvaluateContext(ctx context.Context, scene track.Scene, model vehicle.Model
 	if len(offsets) != len(road) {
 		return Result{}, fmt.Errorf("offsets: got %d, need %d road stations", len(offsets), len(road))
 	}
+	if err := validatePeriodicOffsets(road, offsets); err != nil {
+		return Result{}, err
+	}
 	clearance := model.Parameters().Width/2 + opts.Margin
 	for i, offset := range offsets {
-		if !finite(offset) || road[i].Width/2-clearance <= 0 || math.Abs(offset) > road[i].Width/2-clearance {
+		if !finite(offset) || road[i].LeftLimit() <= clearance || road[i].RightLimit() <= clearance || offset > road[i].LeftLimit()-clearance || offset < -road[i].RightLimit()+clearance {
 			return Result{}, fmt.Errorf("offset at station %.2f m violates vehicle clearance", road[i].S)
 		}
 	}

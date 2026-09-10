@@ -43,8 +43,9 @@ type Node struct {
 }
 
 type Result struct {
-	model vehicle.Model
-	Nodes []Node `json:"nodes"`
+	Closed bool `json:"closed,omitempty"`
+	model  vehicle.Model
+	Nodes  []Node `json:"nodes"`
 	// Offsets are lateral offsets on Road; use Spacing to evaluate them exactly.
 	Offsets []float64 `json:"offsets"`
 	// CenterNodes is the verified centreline trajectory under the same model,
@@ -67,9 +68,10 @@ type Result struct {
 	MaxForceResidual float64        `json:"max_force_residual"`
 }
 
-// Solve treats entry/exit speeds as upper bounds and leaves endpoint offsets
+// Solve treats open-road entry/exit speeds as upper bounds and leaves endpoint offsets
 // and headings free. Baseline and candidate share these conditions, but their
-// realized endpoint speeds can differ. Only feasible time improvements survive.
+// realized endpoint speeds can differ. Closed laps instead identify the endpoint
+// state periodically and ignore these caps. Only feasible time improvements survive.
 func Solve(scene track.Scene, model vehicle.Model, opts Options) (Result, error) {
 	return SolveContext(context.Background(), scene, model, opts)
 }
@@ -101,9 +103,11 @@ func SolveContext(ctx context.Context, scene track.Scene, model vehicle.Model, o
 	}
 	clearance := model.Parameters().Width/2 + opts.Margin
 	bounds := make([]float64, n)
+	centers := make([]float64, n)
 	for i, s := range road {
-		bounds[i] = s.Width/2 - clearance
-		if bounds[i] <= 0 {
+		bounds[i] = (s.LeftLimit()+s.RightLimit())/2 - clearance
+		centers[i] = (s.LeftLimit() - s.RightLimit()) / 2
+		if s.LeftLimit() <= clearance || s.RightLimit() <= clearance {
 			return Result{}, fmt.Errorf("road at %.1f m is narrower than vehicle and clearance", s.S)
 		}
 	}
@@ -156,7 +160,14 @@ func SolveContext(ctx context.Context, scene track.Scene, model vehicle.Model, o
 			a := road[i-1].AtOffset(seed[i-1])
 			b := road[i+1].AtOffset(seed[i+1])
 			d := (.5*(a.X+b.X)-p.X)*road[i].Normal.X + (.5*(a.Y+b.Y)-p.Y)*road[i].Normal.Y
-			next[i] = clamp(seed[i]+.65*d, -.9*bounds[i], .9*bounds[i])
+			next[i] = clamp(seed[i]+.65*d, centers[i]-.9*bounds[i], centers[i]+.9*bounds[i])
+		}
+		if scene.Closed {
+			i := 0
+			p, a, b := road[i].AtOffset(seed[i]), road[n-2].AtOffset(seed[n-2]), road[1].AtOffset(seed[1])
+			d := (.5*(a.X+b.X)-p.X)*road[i].Normal.X + (.5*(a.Y+b.Y)-p.Y)*road[i].Normal.Y
+			next[0] = clamp(seed[0]+.65*d, centers[0]-.9*bounds[0], centers[0]+.9*bounds[0])
+			next[n-1] = next[0]
 		}
 		seed = next
 	}
@@ -178,11 +189,18 @@ func SolveContext(ctx context.Context, scene track.Scene, model vehicle.Model, o
 				for _, sign := range []float64{-1, 1} {
 					candidate := append([]float64(nil), offsets...)
 					for i := range candidate {
-						u := math.Abs(road[i].S-center) / radius
-						if u < 1 {
-							latent := math.Atanh(clamp(candidate[i]/bounds[i], -.999, .999))
-							candidate[i] = bounds[i] * math.Tanh(latent+sign*amp*(1+math.Cos(math.Pi*u))/2)
+						delta := math.Abs(road[i].S - center)
+						if scene.Closed {
+							delta = math.Min(delta, road[n-1].S-delta)
 						}
+						u := delta / radius
+						if u < 1 {
+							latent := math.Atanh(clamp((candidate[i]-centers[i])/bounds[i], -.999, .999))
+							candidate[i] = centers[i] + bounds[i]*math.Tanh(latent+sign*amp*(1+math.Cos(math.Pi*u))/2)
+						}
+					}
+					if scene.Closed {
+						candidate[n-1] = candidate[0]
 					}
 					accept(candidate)
 				}

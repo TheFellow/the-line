@@ -1,11 +1,13 @@
-// Package solver estimates travel time and a useful racing line on open roads.
+// Package solver estimates travel time and a useful racing line on open roads and periodic laps.
 //
 // Solve searches smooth lateral offsets over the entire corner sequence. It uses
 // a finite deterministic coordinate search, not a globally optimal control
 // solver. Endpoint offsets and headings are free. Entry and exit speeds are
 // upper bounds: backward braking can reduce the actual arrival speed. Result
 // reports the baseline's realized endpoints; the optimized endpoints are the
-// first and last Nodes.
+// first and last Nodes. Closed scenes instead use periodic position, curvature,
+// lateral controls and speed; entry/exit caps are ignored. LapAt wraps elapsed
+// time independently, while At and AtStation remain clamped to one lap.
 //
 // # Geometry and refinement
 //
@@ -17,7 +19,7 @@
 // interpolation of bounded lateral controls supplies the refined geometry before
 // any final forces, speeds, or times are computed; output is never smoothed after
 // validation. Tests measure fixed-line 0.5-to-0.25-metre changes against a declared
-// 2% tolerance. These convergence measurements are not physical calibration.
+// 1% tolerance. These convergence measurements are not physical calibration.
 //
 // The road's triangle mesh is authoritative. Paths include a vertex where they
 // cross each cell diagonal, so banked surface heights match the renderer. Signed

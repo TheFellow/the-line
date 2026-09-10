@@ -8,6 +8,9 @@ import (
 
 func (e evaluator) geometry(offset []float64) ([]pathState, error) {
 	n := len(e.road)
+	if err := validatePeriodicOffsets(e.road, offset); err != nil {
+		return nil, err
+	}
 	points := make([]track.Vec3, n)
 	curves := make([]float64, n)
 	for i, s := range e.road {
@@ -25,6 +28,15 @@ func (e evaluator) geometry(offset []float64) ([]pathState, error) {
 	}
 	curves[0] = curves[1]
 	curves[n-1] = curves[n-2]
+	if e.closed() {
+		a, b, c := points[n-2], points[0], points[1]
+		ab, bc, ac := math.Hypot(b.X-a.X, b.Y-a.Y), math.Hypot(c.X-b.X, c.Y-b.Y), math.Hypot(c.X-a.X, c.Y-a.Y)
+		if ab*bc*ac < 1e-9 {
+			return nil, fmt.Errorf("degenerate candidate at lap seam")
+		}
+		curves[0] = 2 * cross(b.X-a.X, b.Y-a.Y, c.X-b.X, c.Y-b.Y) / (ab * bc * ac)
+		curves[n-1] = curves[0]
+	}
 	path := make([]pathState, 0, 2*n)
 	add := func(p track.Vec3, station, k, o, bank, grip float64) {
 		s := 0.
@@ -36,14 +48,21 @@ func (e evaluator) geometry(offset []float64) ([]pathState, error) {
 	}
 	for i := 0; i < n; i++ {
 		s := e.road[i]
-		add(points[i], s.S, curves[i], offset[i], s.Bank, s.Grip)
+		add(points[i], s.S, curves[i], offset[i], s.Bank, s.GripAcross(offset[i], e.clearance))
 		if i == n-1 {
 			break
 		}
 		a, b := e.road[i], e.road[i+1]
+		if a.KerbsCountAsRoad {
+			// Evaluate both cross sections with the outgoing asphalt surface: this
+			// adds kerb conservatism without moving existing road-surface transitions.
+			end := b
+			end.Grip = a.Grip
+			path[len(path)-1].grip = min(a.GripAcross(offset[i], e.clearance), end.GripAcross(offset[i+1], e.clearance))
+		}
 		// The line lies in the convex, clearance-inset cell. Its height follows the
 		// same two authoritative triangles as the renderer, including warped banks.
-		polygon := []track.Vec3{a.AtOffset(a.Width/2 - e.clearance), a.AtOffset(-a.Width/2 + e.clearance), b.AtOffset(-b.Width/2 + e.clearance), b.AtOffset(b.Width/2 - e.clearance)}
+		polygon := []track.Vec3{a.AtOffset(a.LeftLimit() - e.clearance), a.AtOffset(-a.RightLimit() + e.clearance), b.AtOffset(-b.RightLimit() + e.clearance), b.AtOffset(b.LeftLimit() - e.clearance)}
 		if !convex(polygon) {
 			return nil, fmt.Errorf("clearance ribbon folds at station %.2f m", s.S)
 		}
@@ -54,7 +73,7 @@ func (e evaluator) geometry(offset []float64) ([]pathState, error) {
 			// Width is horizontal, but circular vehicle clearance is Euclidean:
 			// tapered side edges can be closer than cross-section width implies.
 			for _, side := range []float64{-1, 1} {
-				edge0, edge1 := a.AtOffset(side*a.Width/2), b.AtOffset(side*b.Width/2)
+				edge0, edge1 := a.AtOffset(a.EdgeOffset(side)), b.AtOffset(b.EdgeOffset(side))
 				dx, dy := edge1.X-edge0.X, edge1.Y-edge0.Y
 				gap := math.Abs(cross(dx, dy, p.X-edge0.X, p.Y-edge0.Y)) / math.Hypot(dx, dy)
 				if gap+1e-7 < e.clearance {
@@ -62,7 +81,7 @@ func (e evaluator) geometry(offset []float64) ([]pathState, error) {
 				}
 			}
 		}
-		d0, d1 := a.AtOffset(-a.Width/2), b.AtOffset(b.Width/2)
+		d0, d1 := a.AtOffset(-a.RightLimit()), b.AtOffset(b.LeftLimit())
 		p, q := points[i], points[i+1]
 		dx, dy := q.X-p.X, q.Y-p.Y
 		ex, ey := d1.X-d0.X, d1.Y-d0.Y
@@ -73,7 +92,7 @@ func (e evaluator) geometry(offset []float64) ([]pathState, error) {
 			if t > 1e-6 && t < 1-1e-6 && u >= 0 && u <= 1 {
 				v := mix(p, q, t)
 				v.Z = lerp(d0.Z, d1.Z, u)
-				add(v, lerp(a.S, b.S, t), lerp(curves[i], curves[i+1], t), lerp(offset[i], offset[i+1], t), lerp(a.Bank, b.Bank, t), a.Grip)
+				add(v, lerp(a.S, b.S, t), lerp(curves[i], curves[i+1], t), lerp(offset[i], offset[i+1], t), lerp(a.Bank, b.Bank, t), path[len(path)-1].grip)
 			}
 		}
 	}
@@ -128,9 +147,19 @@ func distance(a, b track.Vec3) float64 {
 // interpolateOffsets refines the smooth lateral controls, then evaluates fresh
 // road positions and curvature. Latent interpolation keeps widths bounded.
 func interpolateOffsets(coarse []track.Sample, offsets []float64, fine []track.Sample, clearance float64) []float64 {
+	allZero := true
+	for _, offset := range offsets {
+		allZero = allZero && offset == 0
+	}
+	if allZero {
+		return make([]float64, len(fine))
+	}
+	if coarse[0].Closed {
+		return periodicOffsets(coarse, offsets, fine, clearance)
+	}
 	latent := make([]float64, len(coarse))
 	for i := range latent {
-		latent[i] = math.Atanh(clamp(offsets[i]/(coarse[i].Width/2-clearance), -.999999, .999999))
+		latent[i] = math.Atanh(clamp((offsets[i]-(coarse[i].LeftLimit()-coarse[i].RightLimit())/2)/((coarse[i].LeftLimit()+coarse[i].RightLimit())/2-clearance), -.999999, .999999))
 	}
 	// Natural cubic controls are C2. Re-fitting Catmull-Rom derivatives at each
 	// resolution creates artificial curvature jumps and is not a refinement oracle.
@@ -157,7 +186,7 @@ func interpolateOffsets(coarse []track.Sample, offsets []float64, fine []track.S
 		b := clamp((station-coarse[j].S)/ds, 0, 1)
 		a := 1 - b
 		value := a*latent[j] + b*latent[j+1] + ((a*a*a-a)*second[j]+(b*b*b-b)*second[j+1])*ds*ds/6
-		result[i] = (p.Width/2 - clearance) * math.Tanh(value)
+		result[i] = (p.LeftLimit()-p.RightLimit())/2 + ((p.LeftLimit()+p.RightLimit())/2-clearance)*math.Tanh(value)
 	}
 	return result
 }

@@ -1,0 +1,163 @@
+{
+  "closed": true,
+  "kerbs_count_as_road": true,
+  "version": 2,
+  "name": "Club Loop",
+  "vehicle": "gt",
+  "entry_speed_cap": 38,
+  "exit_speed_cap": 55,
+  "points": [
+    {
+      "x": -125,
+      "y": -65,
+      "z": 0,
+      "width_left": 6,
+      "width_right": 6,
+      "kerb_left": {
+        "width": 1,
+        "surface": "wet",
+        "grip": 0.85
+      },
+      "kerb_right": {
+        "width": 1,
+        "surface": "wet",
+        "grip": 0.85
+      },
+      "bank": 0,
+      "surface": "asphalt"
+    },
+    {
+      "x": -35,
+      "y": -85,
+      "z": 0,
+      "width_left": 6,
+      "width_right": 6,
+      "kerb_left": {
+        "width": 1,
+        "surface": "wet",
+        "grip": 0.85
+      },
+      "kerb_right": {
+        "width": 1,
+        "surface": "wet",
+        "grip": 0.85
+      },
+      "bank": 0,
+      "surface": "asphalt"
+    },
+    {
+      "x": 65,
+      "y": -75,
+      "z": 0,
+      "width_left": 6,
+      "width_right": 6,
+      "kerb_left": {
+        "width": 1,
+        "surface": "wet",
+        "grip": 0.85
+      },
+      "kerb_right": {
+        "width": 1,
+        "surface": "wet",
+        "grip": 0.85
+      },
+      "bank": 0,
+      "surface": "asphalt"
+    },
+    {
+      "x": 130,
+      "y": -25,
+      "z": 0,
+      "width_left": 6,
+      "width_right": 6,
+      "kerb_left": {
+        "width": 1,
+        "surface": "wet",
+        "grip": 0.85
+      },
+      "kerb_right": {
+        "width": 1,
+        "surface": "wet",
+        "grip": 0.85
+      },
+      "bank": 0,
+      "surface": "asphalt"
+    },
+    {
+      "x": 110,
+      "y": 50,
+      "z": 0,
+      "width_left": 6,
+      "width_right": 6,
+      "kerb_left": {
+        "width": 1,
+        "surface": "wet",
+        "grip": 0.85
+      },
+      "kerb_right": {
+        "width": 1,
+        "surface": "wet",
+        "grip": 0.85
+      },
+      "bank": 0,
+      "surface": "asphalt"
+    },
+    {
+      "x": 40,
+      "y": 85,
+      "z": 0,
+      "width_left": 6,
+      "width_right": 6,
+      "kerb_left": {
+        "width": 1,
+        "surface": "wet",
+        "grip": 0.85
+      },
+      "kerb_right": {
+        "width": 1,
+        "surface": "wet",
+        "grip": 0.85
+      },
+      "bank": 0,
+      "surface": "asphalt"
+    },
+    {
+      "x": -40,
+      "y": 65,
+      "z": 0,
+      "width_left": 6,
+      "width_right": 6,
+      "kerb_left": {
+        "width": 1,
+        "surface": "wet",
+        "grip": 0.85
+      },
+      "kerb_right": {
+        "width": 1,
+        "surface": "wet",
+        "grip": 0.85
+      },
+      "bank": 0,
+      "surface": "asphalt"
+    },
+    {
+      "x": -115,
+      "y": 35,
+      "z": 0,
+      "width_left": 6,
+      "width_right": 6,
+      "kerb_left": {
+        "width": 1,
+        "surface": "wet",
+        "grip": 0.85
+      },
+      "kerb_right": {
+        "width": 1,
+        "surface": "wet",
+        "grip": 0.85
+      },
+      "bank": 0,
+      "surface": "asphalt"
+    }
+  ]
+}

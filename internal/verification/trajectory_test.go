@@ -59,7 +59,7 @@ func TestPresetVehicleMatrix(t *testing.T) {
 						if last.Time != trajectory.duration {
 							t.Fatal("duration does not match last node")
 						}
-						if first.Speed > scene.EntrySpeed+1e-7 || last.Speed > scene.ExitSpeed+1e-7 {
+						if !scene.Closed && (first.Speed > scene.EntrySpeed+1e-7 || last.Speed > scene.ExitSpeed+1e-7) {
 							t.Fatal("endpoint cap exceeded")
 						}
 						checked := result

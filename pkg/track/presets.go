@@ -1,7 +1,7 @@
 package track
 
 func Presets() []string {
-	return []string{"hairpin", "esses", "compound", "banked", "rally", "decreasing-radius", "banked-bowl", "compression", "chicane", "long-double-apex", "blind-crest"}
+	return []string{"hairpin", "esses", "compound", "banked", "rally", "decreasing-radius", "banked-bowl", "compression", "chicane", "long-double-apex", "blind-crest", "club-loop"}
 }
 
 // Preset returns independent illustrative geometry, not surveyed real-world tracks.
@@ -9,6 +9,8 @@ func Preset(name string) (Scene, error) {
 	s := Scene{Version: Version, Vehicle: "road", EntrySpeed: 38, ExitSpeed: 55}
 	var xy [][2]float64
 	switch name {
+	case "club-loop":
+		return clubLoop(), nil
 	case "hairpin":
 		s.Name = "The Switchback"
 		xy = [][2]float64{{-120, 0}, {-55, 0}, {0, 0}, {28, 14}, {38, 40}, {28, 66}, {0, 80}, {-55, 80}, {-120, 80}}

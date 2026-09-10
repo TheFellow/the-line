@@ -9,7 +9,7 @@ import (
 )
 
 // Study stores editable line hypotheses. Offsets are horizontal metres at the
-// sampled road's stations; zero follows the centreline. Geometry remains v1.
+// sampled road's stations; zero follows the centreline. Geometry uses the scene schema version.
 type Study struct {
 	Version   int         `json:"version"`
 	Manual    *ManualLine `json:"manual,omitempty"`
@@ -84,7 +84,33 @@ func (s Study) Validate() error {
 // RoadDigest identifies physical geometry and surfaces, deliberately excluding
 // names, cars, speed caps and study metadata. Setup changes remain comparable.
 func RoadDigest(scene Scene) string {
-	data, _ := json.Marshal(scene.Points)
+	// Preserve old digests for physically identical symmetric roads, including
+	// their v2 migrations, so existing manual studies keep their identity.
+	type legacyPoint struct {
+		X       float64 `json:"x"`
+		Y       float64 `json:"y"`
+		Z       float64 `json:"z"`
+		Width   float64 `json:"width"`
+		Bank    float64 `json:"bank"`
+		Surface string  `json:"surface"`
+	}
+	points := make([]legacyPoint, len(scene.Points))
+	legacy := !scene.KerbsCountAsRoad && !scene.Closed
+	for i, p := range scene.Points {
+		points[i] = legacyPoint{p.X, p.Y, p.Z, p.LeftWidth() + p.RightWidth(), p.Bank, p.Surface}
+		legacy = legacy && p.LeftWidth() == p.RightWidth() && p.KerbLeft == (Kerb{}) && p.KerbRight == (Kerb{})
+	}
+	var data []byte
+	if legacy {
+		data, _ = json.Marshal(points)
+	} else {
+		canonical := Migrate(Scene{Version: scene.Version, Points: scene.Points})
+		data, _ = json.Marshal(struct {
+			Points []Point `json:"points"`
+			Kerbs  bool    `json:"kerbs_count_as_road"`
+			Closed bool    `json:"closed,omitempty"`
+		}{canonical.Points, scene.KerbsCountAsRoad, scene.Closed})
+	}
 	return fmt.Sprintf("%x", sha256.Sum256(data))
 }
 

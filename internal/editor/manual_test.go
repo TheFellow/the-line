@@ -34,3 +34,21 @@ func TestManualDragBankedOrbitAndGrabOffset(t *testing.T) {
 		}
 	}
 }
+
+func TestClosedManualSeamPicksUniqueHandle(t *testing.T) {
+	s, _ := track.Preset("club-loop")
+	road, err := track.SampleRoad(s, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controls := ManualControls(road, nil, 2)
+	if len(controls) < 4 {
+		t.Fatal("periodic manual controls require three unique handles")
+	}
+	p := bankedProjector{yaw: .7, pitch: .6, scale: 2}
+	x, y := p.Project(road[0].Position)
+	d := BeginLineDrag(road, controls, p, x, y)
+	if d == nil || d.Control != 0 {
+		t.Fatal("duplicate hidden seam captured drag")
+	}
+}

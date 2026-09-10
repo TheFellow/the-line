@@ -10,7 +10,11 @@ import (
 // ManualControls uses sparse, stable road indices. Dense persisted offsets
 // preserve the exact evaluated line; these controls recover its authoring handles.
 func ManualControls(road []track.Sample, offsets []float64, count int) []solver.LineControl {
-	count = max(2, min(count, len(road)))
+	minimum := 2
+	if len(road) > 0 && road[0].Closed {
+		minimum = 4
+	}
+	count = min(len(road), max(minimum, count))
 	controls := make([]solver.LineControl, count)
 	for i := range controls {
 		index := i * (len(road) - 1) / (count - 1)
@@ -38,6 +42,9 @@ func BeginLineDrag(road []track.Sample, controls []solver.LineControl, p LinePro
 	nearest := 15.0
 	var drag *LineDrag
 	for i, c := range controls {
+		if len(road) > 0 && road[0].Closed && c.Index == len(road)-1 {
+			continue
+		}
 		sample := road[c.Index]
 		px, py := p.Project(sample.AtOffset(c.Offset))
 		distance := math.Hypot(x-px, y-py)
