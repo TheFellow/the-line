@@ -293,6 +293,7 @@ func (r *Renderer) perspectiveCar(im *image.RGBA, depths []depthSample, n, a, b 
 	if ghost {
 		col = referenceColor
 	}
+	r.perspectiveMarker(im, depths, center, ghost)
 	r.perspectivePolygon(im, depths, corners, col)
 	nose := center.Add(forward.Mul(2.1)).Add(track.Vec3{Z: .03})
 	r.perspectiveLine(im, depths, nose.Add(side.Mul(width)), nose.Sub(side.Mul(width)), 2, accent)
