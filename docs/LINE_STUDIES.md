@@ -32,7 +32,8 @@ retains the faster verified result. **Adopt as reference** pins the authored run
 **Geometry** hides the authoring handles so numbered road controls can be edited.
 
 Save writes the custom vehicle and study in the scene JSON. A study contains a
-version, sampled manual offsets, and a complete pinned source scene, car, speed
+version, an `active_line` selection (`manual` or `optimized`), sampled manual
+offsets, and a complete pinned source scene, car, speed
 caps and offsets. Load reevaluates the exact saved pin under its original car and
 caps, so its name never stands in for a different run. Native builds save atomic
 files. Browser builds use the same strict JSON in origin-local browser storage,
@@ -40,10 +41,15 @@ keyed by the visible path; that storage is separate from native files. The examp
 [`manual-study.json`](../examples/manual-study.json) contains an authored centreline
 and its named reference on a short fictional sequence.
 
-CLI exports use a compatible saved manual line automatically. `--line manual`
-requires one; `--line optimized` runs a fresh search even when the scene contains
-an authored line. A stale manual line produces an error with the default `auto`
-selection, so geometry changes cannot silently export a different hypothesis.
+CLI exports follow the saved active-line selection automatically. Older studies
+without `active_line` select their manual line when present. `--line manual`
+requires and evaluates the retained authored line; `--line optimized` runs a
+fresh search even when the scene contains one. Optimization keeps the manual
+hypothesis without selecting it, so a later setup change can use an optimized
+line even when that hypothesis no longer fits a wider car. Geometry edits switch
+an invalidated active manual line to optimized in the same undo transaction.
+An explicitly selected stale manual line still produces an error, including
+legacy files whose road changed outside the editor.
 Manual evaluation uses its saved sampling spacing. All three commands share
 this selection behavior:
 

@@ -96,7 +96,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 	f.StringVar(&a.vehicle, "vehicle", "", "vehicle preset override")
 	f.StringVar(&a.vehicleFile, "vehicle-file", "", "custom vehicle JSON file")
 	f.StringVar(&a.out, "out", "", "output file")
-	f.StringVar(&a.line, "line", "auto", "line: auto (saved manual if present), optimized, or manual")
+	f.StringVar(&a.line, "line", "auto", "line: auto (saved active selection), optimized, or manual")
 	f.Float64Var(&a.spacing, "spacing", defaults.Spacing, "sample spacing in metres")
 	f.IntVar(&a.iterations, "iterations", defaults.Iterations, "bounded optimization iterations")
 	f.IntVar(&a.workers, "workers", 0, "fine-candidate workers; zero selects a bounded default")
@@ -205,7 +205,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		return errors.New("animation needs finite --fps between 1 and 50 and nonnegative --duration")
 	}
 	opts := solver.Options{Spacing: a.spacing, Iterations: a.iterations, Margin: a.margin, Workers: a.workers, Polish: a.polish}
-	manual := a.line == "manual" || a.line == "auto" && scene.Study != nil && scene.Study.Manual != nil
+	manual := a.line == "manual" || a.line == "auto" && scene.Study.UsesManual()
 	var result solver.Result
 	if manual {
 		if scene.Study == nil || scene.Study.Manual == nil {

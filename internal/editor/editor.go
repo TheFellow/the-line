@@ -57,6 +57,16 @@ func (e *Editor) index(i int) error {
 	return nil
 }
 func (e *Editor) commit(s track.Scene, selected int) error {
+	// A geometry edit keeps the authored hypothesis for inspection, but it
+	// cannot remain the active line on a different road. Persist that choice
+	// in the same transaction so Undo restores both geometry and line intent.
+	if s.Study.UsesManual() {
+		digest := track.RoadDigest(s)
+		if s.Study.Manual.RoadDigest != digest && digest != track.RoadDigest(e.current.scene) {
+			s = clone(s)
+			s.Study.ActiveLine = track.LineOptimized
+		}
+	}
 	if err := valid(s); err != nil {
 		return err
 	}

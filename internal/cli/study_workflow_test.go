@@ -233,3 +233,42 @@ func TestEveryCommandHelpReturnsSuccess(t *testing.T) {
 		})
 	}
 }
+
+func TestOptimizedStudyRetainsIncompatibleManualHypothesis(t *testing.T) {
+	scene, path := savedStraightStudy(t)
+	for i := range scene.Points {
+		scene.Points[i].Width = 6
+	}
+	for i := range scene.Study.Manual.Offsets {
+		scene.Study.Manual.Offsets[i] = 1.81
+	}
+	scene.Study.Manual.RoadDigest = track.RoadDigest(scene)
+	roadCar, _ := vehicle.Preset("road")
+	if _, err := solver.Evaluate(scene, roadCar, scene.Study.Manual.Offsets, solver.DefaultOptions()); err != nil {
+		t.Fatalf("authored line must be feasible for original road car: %v", err)
+	}
+	scene.Vehicle = "gt"
+	scene.Study.ActiveLine = track.LineOptimized
+	if err := track.Save(path, scene); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := Run([]string{"solve", "--scene", path, "--iterations", "1"}, &out, io.Discard); err != nil {
+		t.Fatalf("saved optimized study did not reload with wider car: %v", err)
+	}
+	var decoded struct {
+		Scene  track.Scene
+		Result solver.Result
+		Method string
+	}
+	if err := json.Unmarshal(out.Bytes(), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Scene.Study.ActiveLine != track.LineOptimized || decoded.Scene.Study.Manual.Offsets[0] != 1.81 || strings.Contains(decoded.Method, "manual") || decoded.Result.Duration <= 0 {
+		t.Fatal("optimized export lost active selection or retained manual hypothesis")
+	}
+	err := Run([]string{"solve", "--scene", path, "--line", "manual"}, io.Discard, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "clearance") {
+		t.Fatalf("explicit manual selection must still evaluate the incompatible authored line: %v", err)
+	}
+}

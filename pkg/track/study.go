@@ -11,9 +11,22 @@ import (
 // Study stores editable line hypotheses. Offsets are horizontal metres at the
 // sampled road's stations; zero follows the centreline. Geometry uses the scene schema version.
 type Study struct {
-	Version   int         `json:"version"`
-	Manual    *ManualLine `json:"manual,omitempty"`
-	Reference *PinnedLine `json:"reference,omitempty"`
+	Version    int         `json:"version"`
+	ActiveLine string      `json:"active_line,omitempty"` // Empty retains legacy manual-if-present selection.
+	Manual     *ManualLine `json:"manual,omitempty"`
+	Reference  *PinnedLine `json:"reference,omitempty"`
+}
+
+const (
+	LineManual    = "manual"
+	LineOptimized = "optimized"
+)
+
+// UsesManual reports the selected line independently of editor handle visibility.
+// Older studies select their manual line when one is present. An optimized study
+// may retain that hypothesis without selecting it for playback or exports.
+func (s *Study) UsesManual() bool {
+	return s != nil && s.Manual != nil && (s.ActiveLine == "" || s.ActiveLine == LineManual)
 }
 
 type ManualLine struct {
@@ -52,6 +65,12 @@ func (m ManualLine) Validate() error {
 func (s Study) Validate() error {
 	if s.Version != 1 {
 		return fmt.Errorf("study: unsupported version %d", s.Version)
+	}
+	if s.ActiveLine != "" && s.ActiveLine != LineManual && s.ActiveLine != LineOptimized {
+		return fmt.Errorf("study: active_line must be manual or optimized")
+	}
+	if s.ActiveLine == LineManual && s.Manual == nil {
+		return fmt.Errorf("study: active manual line requires saved offsets")
 	}
 	if s.Manual != nil {
 		if err := s.Manual.Validate(); err != nil {
