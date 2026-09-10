@@ -111,7 +111,8 @@ func (s Sample) AtOffset(offset float64) Vec3 {
 	return s.Position.Add(s.Normal.Mul(offset)).Add(Vec3{Z: offset * math.Tan(s.Bank*math.Pi/180)})
 }
 
-// SampleRoad interpolates source points with chord-scaled cubic Hermite curves.
+// SampleRoad interpolates source points with a natural C2 cubic spline in spatial
+// chord length. Width and bank use bounded C1 interpolation in road station.
 // Every source point remains a station, so categorical surface transitions are retained.
 // S is centreline spatial arc length; Normal and Grade use the horizontal tangent.
 func SampleRoad(scene Scene, spacing float64) ([]Sample, error) {
@@ -122,24 +123,14 @@ func SampleRoad(scene Scene, spacing float64) ([]Sample, error) {
 		return nil, fmt.Errorf("track: spacing must be between 0.25 and 20 metres")
 	}
 	p := scene.Points
-	tangents := make([]Vec3, len(p))
-	for i := range p {
-		a, b := max(0, i-1), min(len(p)-1, i+1)
-		d := p[b].Position().Sub(p[a].Position())
-		length := math.Hypot(d.X, d.Y)
-		if length < 1e-6 {
-			return nil, fmt.Errorf("track: point %d reverses direction abruptly", i)
-		}
-		tangents[i] = d.Mul(1 / length)
-	}
+	spline := newCenterSpline(p)
 	var out []Sample
 	for i := 0; i < len(p)-1; i++ {
-		a, b := p[i].Position(), p[i+1].Position()
-		chord := math.Hypot(b.X-a.X, b.Y-a.Y)
-		m0, m1 := tangents[i].Mul(chord), tangents[i+1].Mul(chord)
+		a := p[i].Position()
+		chord := spline.spans[i]
 		curve := func(t float64) (Vec3, Vec3) {
-			t2, t3 := t*t, t*t*t
-			return a.Mul(2*t3 - 3*t2 + 1).Add(m0.Mul(t3 - 2*t2 + t)).Add(b.Mul(-2*t3 + 3*t2)).Add(m1.Mul(t3 - t2)), a.Mul(6*t2 - 6*t).Add(m0.Mul(3*t2 - 4*t + 1)).Add(b.Mul(-6*t2 + 6*t)).Add(m1.Mul(3*t2 - 2*t))
+			position, derivative, _ := spline.at(i, t)
+			return position, derivative
 		}
 		dense := max(32, int(math.Ceil(chord/0.25)))
 		lengths := make([]float64, dense+1)
@@ -171,7 +162,11 @@ func SampleRoad(scene Scene, spacing float64) ([]Sample, error) {
 				surface = p[i+1].Surface
 			}
 			mu, _ := grip(surface)
-			sample := Sample{Position: pos, Normal: Vec3{-der.Y / horizontal, der.X / horizontal, 0}, Width: p[i].Width + (p[i+1].Width-p[i].Width)*t, Bank: p[i].Bank + (p[i+1].Bank-p[i].Bank)*t, Grade: der.Z / horizontal, Grip: mu, Surface: surface}
+			// Smoothstep in arc-length fraction has zero end slopes, preserving
+			// C1 bank and width at knots without overshooting their input bounds.
+			u := float64(j) / float64(count)
+			blend := u * u * (3 - 2*u)
+			sample := Sample{Position: pos, Normal: Vec3{-der.Y / horizontal, der.X / horizontal, 0}, Width: p[i].Width + (p[i+1].Width-p[i].Width)*blend, Bank: p[i].Bank + (p[i+1].Bank-p[i].Bank)*blend, Grade: der.Z / horizontal, Grip: mu, Surface: surface}
 			if len(out) > 0 {
 				last := out[len(out)-1]
 				sample.S = last.S + pos.Sub(last.Position).Length()

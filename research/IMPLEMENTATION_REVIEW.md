@@ -2,7 +2,7 @@
 
 Reviewed 2026-09-09 against [the pre-implementation critique](CRITIQUE.md). Scope: `pkg/track`, `pkg/vehicle`, `pkg/solver`, their tests, and independent probes through public APIs. Rendering and GUI interaction are reviewed separately by the root agent.
 
-Outcome: the consequential issues found during review have been corrected. The implementation is suitable for the documented interactive, quasi-static planning scope, with a measured 2% discretization tolerance on the supplied fixtures. This is not a claim of real-vehicle accuracy or globally optimal trajectories.
+Outcome: the consequential issues found during review have been corrected. The implementation is suitable for the documented interactive, quasi-static planning scope, with an initial 2% discretization tolerance on the supplied fixtures, tightened to 1% after the C2-road update below. This is not a claim of real-vehicle accuracy or globally optimal trajectories.
 
 ## Consequential findings
 
@@ -36,20 +36,26 @@ The settled implementation's final matrix outcome is recorded below. Its indepen
 
 ## Final validation
 
-The default four-sweep search, with at most 16 shortlisted candidates for final verification, produced these results. All exported trajectories use 0.5 m verification sampling. The last column reevaluates the selected path at 0.25 m.
+Updated 2026-09-10 for the C2 centreline: the default four-sweep search, with at most 16 shortlisted candidates for final verification, produced these results. All exported trajectories use 0.5 m verification sampling. The last column reevaluates the selected path at 0.25 m.
 
 | Preset | Verified time (s) | Centreline time (s) | Improvement | Same-path refinement difference |
 | --- | ---: | ---: | ---: | ---: |
-| Hairpin | 12.8881 | 13.3835 | 3.70% | 1.222% |
-| Esses | 15.0346 | 17.3632 | 13.41% | 0.958% |
-| Compound | 14.1882 | 15.1315 | 6.23% | 1.038% |
-| Banked | 10.2551 | 10.6991 | 4.15% | 0.370% |
-| Rally | 23.1780 | 24.0995 | 3.82% | 0.574% |
+| Hairpin | 12.7846 | 13.1927 | 3.09% | 0.034% |
+| Esses | 14.2406 | 15.8486 | 10.15% | 0.010% |
+| Compound | 13.4994 | 14.2469 | 5.25% | 0.039% |
+| Banked | 10.0905 | 10.3477 | 2.49% | 0.009% |
+| Rally | 21.4534 | 22.5854 | 5.01% | 0.044% |
 
-The original critique proposed an initial 1% target. Hairpin and compound exceed it, so the accepted tolerance is explicitly 2%; no claim that every preset achieved 1% remains. Baseline refinement differences on hairpin, banked and rally are 0.063%, 0.088% and 0.074%, respectively. These figures bound the observed fixture differences, not all possible user-created roads.
+The C2 update meets the original 1% target on all five presets; the optimized-path regression tolerance is now 1% (formerly 2%). Baseline refinement differences on hairpin, banked and rally are 0.006%, 0.002% and 0.032%, respectively. These figures bound the observed fixture differences, not all possible user-created roads.
 
-Final command: `go test ./internal/verification ./pkg/solver -count=1 -v` passed. All 15 independent matrix cases passed in 16.23 s, with maximum sampled force excess 0.000000976 m/s². Every tested trajectory cleared the actual side edges and lay on its authoritative road triangles. The solver suite passed constant-acceleration, launch/stop, restrictive-cap, default improvement, deterministic replay, circular curvature, banking symmetry, refinement, invalid-input and braking-before-surface-transition checks; the table above was reproduced in that run.
+Final command: `go test ./internal/verification ./pkg/solver -count=1 -v` passed. The updated 15-case independent matrix passed in 22.57 s (running alongside solver tests), checking both trajectories, with maximum sampled force excess 0.000000865 m/s². Every tested trajectory cleared the actual side edges and lay on its authoritative road triangles. The solver suite passed constant-acceleration, launch/stop, restrictive-cap, default improvement, deterministic replay, circular curvature, banking symmetry, refinement, invalid-input and braking-before-surface-transition checks; the table above was reproduced in that run.
 
 `go test ./internal/verification ./pkg/track ./pkg/vehicle -count=1 -v` also passed after adding the independent triangle-height checks. Track and vehicle checks cover geometry rejection, persistence, signed banking, drag/grade, torque distribution and power limits.
 
 The solver requires a feasible centreline baseline and may reject a scene even if a different path could make it feasible. It also deliberately rejects stationary cross-slope infeasibility because its speed representation assumes feasible intervals beginning at zero. Remaining model limits are fixed axle loads, no steering-rate/tyre-slip dynamics, no suspension or crest unloading, and an approximate combination of bank and grade. The circular clearance model does not certify a rectangular vehicle's swept body. These limits are consistent with the stated first-slice scope.
+
+## C2 geometry follow-up, 2026-09-10
+
+The current fixture figures above were rerun after replacing chord-scaled Hermite spans with a natural cubic in spatial chord length. The original numerical review and its scope remain applicable; this update records implementation-agent measurements, not a new independent certification. Direct derivative continuity and an analytical natural-cubic arch are covered by `pkg/track/spline_test.go`; sampled-position curvature remains an independent check. Bounded C1 width/bank interpolation preserves control values and categorical surface anchors. Version 1 interchange remains compatible.
+
+The near-control mesh-gradient maximum is 0.000883 1/m on compound, so the suggested 0.0005 target is not universally met; the declared fixture bound is 0.001. C2 interpolation also does not guarantee one speed minimum per geometric corner: the optimized esses trace retains secondary extrema. No speed smoothing has been introduced. See [the iteration validation record](../docs/VALIDATION.md#iteration-1-curvature-continuous-roads-2026-09-10) for the complete measured curvature table, refinement improvement, visual matrix and explicit limitations.

@@ -10,23 +10,23 @@ Measured on 2026-09-09 with Go 1.24.0, macOS/amd64, Intel Core i5-1038NG7. All v
 - `CGO_ENABLED=0 go build -o bin/the-line-headless ./main/cli`: passed. The CLI has no graphics-driver initialization or native game-engine requirement.
 - CLI creation → validation → JSON/CSV solve → PNG in both views → timed GIF passed in `internal/cli`. Failed exports preserve existing files.
 
-## Solver results
+## Solver results — C2 roads, 2026-09-10
 
 Default vehicle for each scene, 3 m search spacing, 0.5 m final validation spacing, four search sweeps, 0.25 m additional clearance:
 
 | Sequence | Centreline | Verified line | Improvement | Same-path 0.5 → 0.25 m time change |
 | --- | ---: | ---: | ---: | ---: |
-| Hairpin | 13.3835 s | 12.8881 s | 3.70% | 1.222% |
-| Esses | 17.3632 s | 15.0346 s | 13.41% | 0.958% |
-| Compound | 15.1315 s | 14.1882 s | 6.23% | 1.038% |
-| Banked | 10.6991 s | 10.2551 s | 4.15% | 0.370% |
-| Rally | 24.0995 s | 23.1780 s | 3.82% | 0.574% |
+| Hairpin | 13.1927 s | 12.7846 s | 3.09% | 0.034% |
+| Esses | 15.8486 s | 14.2406 s | 10.15% | 0.010% |
+| Compound | 14.2469 s | 13.4994 s | 5.25% | 0.039% |
+| Banked | 10.3477 s | 10.0905 s | 2.49% | 0.009% |
+| Rally | 22.5854 s | 21.4534 s | 5.01% | 0.044% |
 
-The independent matrix covers all 15 track/vehicle pairings, at one search sweep. It checks exact segment clearance to road sides, triangle surface heights, endpoint speed caps, finite values, time/acceleration kinematics, and 129 independent force-balance evaluations per output segment. All passed; maximum longitudinal force excess was 0.000000976 m/s². See [the independent implementation review](../research/IMPLEMENTATION_REVIEW.md) for method and caveats.
+The independent matrix covers all 15 track/vehicle pairings, at one search sweep. It checks exact segment clearance to road sides, triangle surface heights, endpoint speed caps, finite values, time/acceleration kinematics, and 129 independent force-balance evaluations per output segment. All passed; maximum longitudinal force excess was 0.000000865 m/s². See [the independent implementation review](../research/IMPLEMENTATION_REVIEW.md) for method and caveats.
 
-The initial research target was less than 1% refinement error. Measured same-path changes reach 1.222%; the implemented regression tolerance is explicitly 2%. Searching at a different coarse resolution can discover a different local solution. Neither test establishes a global optimum. A default esses solve benchmark took 2.13 s with 20.4 MB allocated; solving happens off the UI thread.
+After the C2 centreline change, measured same-path changes are at most 0.044%; the implemented regression tolerance is tightened from 2% to 1%. This supersedes the earlier Hermite-road table, whose maximum was 1.222%. Searching at a different coarse resolution can discover a different local solution. Neither test establishes a global optimum. The earlier Hermite-road default esses solve benchmark took 2.13 s with 20.4 MB allocated; solving happens off the UI thread.
 
-## Rendered artifacts and live execution
+## Rendered artifacts and live execution — initial release, 2026-09-09
 
 The final binaries generated and the agent visually inspected:
 
@@ -87,3 +87,25 @@ Both ended on the restored road-car esses result: optimized 15.034620715 s, refe
 `artifacts/browser/report.json` contains the final combined run. The opposite-side, transformed-edit, GT-comparison, ghost-finish and comparison PNGs record actual browser output; both views were visually inspected. Measured eight-step camera gestures took 1.545–1.643 s in elevated software Chrome and 0.985–1.293 s in plan view, including input dispatch and synchronization. These do not measure native desktop responsiveness.
 
 The final source passed `go test ./...`, `go vet ./...`, and `make build`. Both native binaries were rebuilt. Fresh CLI plan/elevated comparison images and the complete GIF were rendered and inspected. The final integration review found and corrected progress rescaling for valid sub-second sequences; no further actionable issues remained. No native desktop windows were opened for this release.
+
+## Iteration 1: curvature-continuous roads, 2026-09-10
+
+`track.SampleRoad` now fits a natural cubic through the original control points in spatial chord length. Position and the first two derivatives are continuous at every knot. Arc-length sampling retains every control point and categorical surface boundary. Width and bank use bounded smoothstep interpolation in each span's arc-length fraction, with zero slopes at joins. Version 1 scenes load unchanged; their between-control geometry and estimated times intentionally change. Natural cubic interpolation can influence neighboring spans when one control moves and can overshoot; authoritative ribbon validation still rejects unsupported folds and crossings.
+
+Independent sampled-position circumcircles at 0.5 m spacing give these absolute adjacent-curvature differences:
+
+| Preset | Maximum anywhere (1/m) | Maximum within 0.5 m of a control (1/m) |
+| --- | ---: | ---: |
+| Hairpin | 0.00035286 | 0.00027400 |
+| Esses | 0.00047457 | 0.00044158 |
+| Compound | 0.00105270 | 0.00088287 |
+| Banked | 0.00009582 | 0.00007307 |
+| Rally | 0.00089461 | 0.00075723 |
+
+The fixture regression bounds are 0.0015 1/m overall and 0.001 1/m near controls. The suggested 0.0005 near-control target holds for three presets, but not compound or rally. C2 continuity removes jumps; it does not bound a road's curvature gradient. The largest sampled changes occur between control stations rather than exactly at a control. Tests separately prove C2 continuity, natural endpoint conditions, a closed-form three-point arch, exact straight grade, bounded cross sections, retained surface stations, and rejection of wide folds, self-crossings, reversals and short wide bends at multiple spacings.
+
+The proposed “one local speed minimum per corner” criterion is **not achieved** by this change. With a 1e-6 m/s dead band, the default esses optimized road-car trace has nine minima and the GT trace has eight; their centreline traces each have five. Some additional extrema are small (the road-car rise at 59.79–62.46 m is 0.090 m/s). C2 roads do not impose curvature monotonicity on the reference or optimized line. The verified speed trace remains unsmoothed so these optimizer/model features are visible; no appearance-only filter conceals them. Addressing that stricter criterion needs explicit path-shape constraints or a richer search objective, assessed against travel time and force feasibility.
+
+`go test ./pkg/track ./pkg/solver ./internal/verification -count=1 -v` passed. Optimized same-path refinement now stays below 0.045% on every supplied preset, and the regression threshold is tightened to 1%. The full measured table above supersedes the initial release figures.
+
+The integration review rendered every preset in both views with the GT using `go run ./tools/review -out artifacts/iteration1-review`. All ten images in `artifacts/iteration1-review/gallery.png` were visually inspected: smooth road joins, line/car alignment with the ribbon, readable station charts and surface transitions. This matrix uses a single fixed GT configuration; the numerical fixture table uses each preset's default vehicle. Native windows were not opened.

@@ -94,3 +94,23 @@ func TestInvalidGeometry(t *testing.T) {
 		})
 	}
 }
+
+func TestSplineRejectsSelfIntersectionAndReversal(t *testing.T) {
+	for name, xy := range map[string][][2]float64{
+		"crossing":        {{-60, -40}, {60, 40}, {-60, 40}, {60, -40}},
+		"reversal":        {{0, 0}, {50, 0}, {0, 0}},
+		"short wide bend": {{0, 0}, {10, 0}, {11, 1}, {10, 10}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := Scene{Version: 1, Name: name}
+			for _, p := range xy {
+				s.Points = append(s.Points, Point{X: p[0], Y: p[1], Width: 12, Surface: "asphalt"})
+			}
+			for _, spacing := range []float64{.25, .5, 3} {
+				if _, err := SampleRoad(s, spacing); err == nil {
+					t.Fatalf("accepted invalid ribbon at %gm spacing", spacing)
+				}
+			}
+		})
+	}
+}

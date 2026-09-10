@@ -156,8 +156,8 @@ func verifyResult(t *testing.T, r Result, s track.Scene, v vehicle.Config, opts 
 	}
 	change := math.Abs(dense.Duration-r.Duration) / dense.Duration
 	t.Logf("verified %.2fm to .25m: %.3f%% (%g to %g)", r.Spacing, change*100, r.Duration, dense.Duration)
-	if change > .02 {
-		t.Fatalf("verified path refinement exceeds 2 percent: %.3f%%", change*100)
+	if change > .01 {
+		t.Fatalf("verified path refinement exceeds 1 percent: %.3f%%", change*100)
 	}
 	for i, n := range r.Nodes {
 		if !finite(n.Speed) || !finite(n.Time) || n.Speed < 0 {
