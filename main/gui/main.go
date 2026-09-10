@@ -48,7 +48,7 @@ type game struct {
 	texture              *ebiten.Image
 	replies              chan solved
 	busy                 bool
-	rollback             func() bool
+	rollback             func()
 	playing              bool
 	clock                float64
 	status               string
@@ -58,6 +58,8 @@ type game struct {
 	captureErr           error
 	started              time.Time
 	drag                 *editor.Drag
+	scrubbing            bool
+	pointerCancelled     bool
 	pointerX, pointerY   float64
 	hover                int
 	fileEditing          bool
@@ -122,6 +124,7 @@ func main() {
 	}
 	g := &game{opts: o, ed: ed, solvedScene: s, renderer: r, result: result, config: v, playing: true, replies: make(chan solved, 1), started: time.Now(), nextDemo: 20}
 	g.texture = ebiten.NewImage(o.width, o.height)
+	attachInspection(g)
 	ebiten.SetWindowSize(o.width, o.height)
 	ebiten.SetWindowTitle("The Line · Racing geometry studio")
 	if o.demo {
@@ -180,7 +183,7 @@ func (g *game) rebuild() error {
 	return nil
 }
 
-func (g *game) queueSolve(rollback func() bool) {
+func (g *game) queueSolve(rollback func()) {
 	g.busy = true
 	g.rollback = rollback
 	g.setStatus("Computing a feasible line… playback continues")
@@ -197,6 +200,7 @@ func (g *game) queueSolve(rollback func() bool) {
 }
 
 func (g *game) Update() error {
+	defer inspectFrame(g)
 	if g.captured {
 		return ebiten.Termination
 	}
@@ -219,6 +223,7 @@ func (g *game) Update() error {
 			}
 			g.setStatus(fmt.Sprintf("Solved · %.2f s · %.2f s faster than centreline", g.result.Duration, g.result.CenterDuration-g.result.Duration))
 		}
+		g.rollback = nil
 	default:
 	}
 	if g.playing {
@@ -233,14 +238,17 @@ func (g *game) Update() error {
 		}
 		return nil
 	}
+	if pointerInterrupted() || !ebiten.IsFocused() {
+		g.cancelPointer()
+		return nil
+	}
 	if g.fileEditing {
 		g.editPath()
 		return nil
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
-		if g.drag != nil {
-			g.drag = nil
-			g.setStatus("Drag cancelled")
+		if g.drag != nil || g.scrubbing {
+			g.cancelPointer()
 			return nil
 		}
 		return ebiten.Termination
@@ -314,21 +322,51 @@ func (g *game) mouse() {
 	ebiten.SetCursorShape(shape)
 }
 
+// cancelPointer discards an incomplete gesture and waits for a fresh press.
+func (g *game) cancelPointer() {
+	if g.drag != nil || g.scrubbing {
+		g.setStatus("Gesture cancelled")
+	}
+	g.drag = nil
+	g.scrubbing = false
+	g.hover = -1
+	g.pointerCancelled = true
+}
+
 // pointer is shared by real mouse events and the automated drag scenario.
 func (g *game) pointer(x, y float64, pressed, held, released bool) {
 	g.pointerX, g.pointerY = x, y
 	g.hover = -1
+	if g.pointerCancelled {
+		if !held || pressed {
+			g.pointerCancelled = false
+		}
+		if !pressed {
+			return
+		}
+	}
+	if x < 0 || y < 0 || x >= float64(g.opts.width) || y >= float64(g.opts.height) {
+		if g.drag != nil || g.scrubbing {
+			g.cancelPointer()
+		}
+		return
+	}
+	if g.scrubbing {
+		g.scrub(int(x))
+		if released || !held {
+			g.scrubbing = false
+		}
+		return
+	}
 	for key, rect := range g.renderer.Controls() {
 		if image.Pt(int(x), int(y)).In(rect) && g.drag == nil {
 			if pressed {
 				if key == "scrub" {
+					g.scrubbing = true
 					g.scrub(int(x))
 				} else {
 					g.action(key)
 				}
-			}
-			if held && key == "scrub" {
-				g.scrub(int(x))
 			}
 			return
 		}
@@ -351,11 +389,12 @@ func (g *game) pointer(x, y float64, pressed, held, released bool) {
 	if g.drag != nil && released {
 		drag := g.drag
 		g.drag = nil
+		restore := g.ed.Checkpoint()
 		changed, err := drag.Commit(g.ed, g.renderer, x, y)
 		if err != nil {
 			g.recordError(err)
 		} else if changed {
-			g.queueSolve(g.ed.Undo)
+			g.queueSolve(restore)
 		}
 	}
 }
@@ -382,7 +421,9 @@ func (g *game) action(key string) {
 		g.clock = 0
 		return
 	case "view":
-		g.drag = nil
+		if g.drag != nil || g.scrubbing {
+			g.cancelPointer()
+		}
 		if g.opts.view == "3d" {
 			g.opts.view = "2d"
 		} else {
@@ -412,7 +453,7 @@ func (g *game) action(key string) {
 		return
 	}
 	var err error
-	rollback := g.ed.Undo
+	rollback := g.ed.Checkpoint()
 	p := s.Points[i]
 	switch key {
 	case "save":
@@ -456,7 +497,6 @@ func (g *game) action(key string) {
 			g.setStatus("Nothing to undo")
 			return
 		}
-		rollback = g.ed.Redo
 	case "redo":
 		if !g.ed.Redo() {
 			g.setStatus("Nothing to redo")

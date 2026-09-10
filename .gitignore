@@ -2,3 +2,5 @@
 /artifacts/
 *.tmp
 .DS_Store
+
+/tools/browser/node_modules/

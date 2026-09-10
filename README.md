@@ -22,7 +22,7 @@ go run ./main/cli presets
 
 ## Live editor
 
-Hold the left mouse button on a numbered circular handle, drag it, and release to recompute the line. Handles highlight under the pointer; amber road edges preview the change while dragging. Press Escape to cancel a drag. The road surface itself is not a drag target. Use the sidebar to change width, bank, elevation and surface, add or delete controls, switch vehicles and cycle the built-in sequences. Playback continues while a background solve runs. A rejected edit restores the last valid scene.
+Hold the left mouse button on a numbered circular handle, drag it, and release to recompute the line. Handles highlight under the pointer; amber road edges preview the change while dragging. Press Escape to cancel a drag. Switching views, losing focus, or leaving the canvas also cancels an unfinished gesture. The road surface itself is not a drag target. Use the sidebar to change width, bank, elevation and surface, add or delete controls, switch vehicles and cycle the built-in sequences. Playback continues while a background solve runs. A rejected edit restores the last valid scene and its undo/redo history. Dragging changes the ground-plane position while preserving elevation; use the elevation controls to change height. The elevated camera is fixed; Tab switches between plan and elevated views.
 
 | Control | Action |
 | --- | --- |
@@ -92,10 +92,15 @@ make test
 make vet
 make verify
 
+# Real mouse/keyboard tests in headless Chrome; no desktop windows.
+make verify-headless
+
 # Exercise the live editor and capture actual Ebitengine output.
 ./bin/the-line-studio --demo --frames 240 --file artifacts/edited.json \
   --capture artifacts/editor.png --report artifacts/editor-report.json
 ```
+
+Headless verification requires Node.js and Chrome (automatically found in its standard macOS location; set `LINE_CHROME_PATH` elsewhere). It builds the same Go editor for WebAssembly with a read-only inspection bridge, sends real browser input through Ebitengine, and writes screenshots and a JSON report under `artifacts/browser/`.
 
 Measured solver accuracy, native frame rates, and verification commands are recorded in [docs/VALIDATION.md](docs/VALIDATION.md).
 

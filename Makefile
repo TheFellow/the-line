@@ -1,4 +1,4 @@
-.PHONY: all build test vet demo verify verify-gui clean
+.PHONY: all build test vet demo verify verify-gui verify-headless clean
 
 all: test build
 
@@ -25,6 +25,11 @@ verify: build test vet
 verify-gui: build
 	mkdir -p artifacts
 	./bin/the-line-studio --preset banked --demo --frames 1800 --file artifacts/edited.json --capture artifacts/editor.png --report artifacts/editor-report.json
+
+# Real browser input through Ebitengine, without opening a desktop window.
+verify-headless:
+	npm --prefix tools/browser ci
+	npm --prefix tools/browser test
 
 clean:
 	rm -rf bin
