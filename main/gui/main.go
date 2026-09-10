@@ -51,6 +51,7 @@ type game struct {
 	raceReturnRenderer   *render.Renderer
 	race                 *racecraft.Result
 	raceReplies          chan raceReply
+	cancelRacePlan       context.CancelFunc
 	raceReturnView       string
 	authoringOpen        bool
 	importRequests       chan csvImport
@@ -110,10 +111,10 @@ func main() {
 	var o options
 	flag.StringVar(&o.mode, "mode", "qualifying", "qualifying or racecraft")
 	flag.StringVar(&o.scenario, "scenario", "over-under", "racecraft example")
-	flag.StringVar(&o.raceFile, "race-file", "", "load race experiment; also save/load path")
+	flag.StringVar(&o.raceFile, "race-file", "", "load race experiment (implies racecraft mode); also save/load path")
 	flag.StringVar(&o.preset, "preset", "esses", "starting corner sequence (hairpin, esses, compound, banked, rally)")
 	flag.StringVar(&o.scene, "scene", "", "load a scene JSON instead of a preset")
-	flag.StringVar(&o.vehicle, "vehicle", "", "override the scene vehicle preset")
+	flag.StringVar(&o.vehicle, "vehicle", "", "override vehicle preset in qualifying and racecraft, including a loaded experiment")
 	flag.StringVar(&o.view, "view", "3d", "initial view: 2d or 3d")
 	flag.StringVar(&o.file, "file", "scene.json", "editor save/load path; click the path to edit it")
 	flag.StringVar(&o.capture, "capture", "", "capture actual final Ebitengine Draw as PNG")

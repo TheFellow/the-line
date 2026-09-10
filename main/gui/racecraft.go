@@ -11,8 +11,9 @@ import (
 )
 
 type raceReply struct {
-	result racecraft.Result
-	err    error
+	result       racecraft.Result
+	err          error
+	resetExample bool
 }
 
 func (g *game) racePath() string {
@@ -22,63 +23,102 @@ func (g *game) racePath() string {
 	return "racecraft.json"
 }
 
-func (g *game) startRace(e racecraft.Experiment) {
+func (g *game) startRace(e racecraft.Experiment, resetExample bool) {
+	g.cancelRace()
+	// Detach any qualifying chooser. Its callback can finish without editing
+	// the retained study, even if the user returns before the read completes.
+	g.importRequests = nil
 	g.cancelPointer()
 	g.busy = true
 	g.setStatus("Planning two cars and checking continuous body clearance...")
 	g.raceReplies = make(chan raceReply, 1)
 	replies := g.raceReplies
+	ctx, cancel := context.WithCancel(context.Background())
+	g.cancelRacePlan = cancel
 	go func() {
-		r, err := racecraft.Plan(context.Background(), e.Scene, e.Vehicle, e.Config)
-		replies <- raceReply{r, err}
+		r, err := racecraft.Plan(ctx, e.Scene, e.Vehicle, e.Config)
+		replies <- raceReply{r, err, resetExample}
 	}()
 }
+
+// Replies belong to one buffered channel per plan; abandoning it makes stale
+// completions harmless and never blocks the planner while it exits.
+func (g *game) cancelRace() {
+	if g.cancelRacePlan != nil {
+		g.cancelRacePlan()
+		g.cancelRacePlan = nil
+	}
+	if g.raceReplies != nil {
+		g.raceReplies = nil
+		g.busy = false
+	}
+}
+
 func (g *game) acceptRace() {
 	if g.raceReplies == nil {
 		return
 	}
 	select {
 	case reply := <-g.raceReplies:
-		g.raceReplies = nil
-		g.busy = false
+		g.cancelRace()
 		if reply.err != nil {
 			g.setStatus("Race edit rejected: " + reply.err.Error())
 			return
 		}
-		old := g.race
-		g.race = &reply.result
-		if old == nil {
-			g.raceReturnView = g.opts.view
-			g.raceReturnRenderer = g.renderer
+		view := g.opts.view
+		if view == "perspective" {
+			view = "3d"
 		}
-		if g.opts.view == "perspective" {
-			g.opts.view = "3d"
-		}
-		g.clock = 0
-		g.resetCamera = old == nil || old.Config.Scenario != reply.result.Config.Scenario
-		if err := g.rebuild(); err != nil {
-			g.race = old
+		resetCamera := g.race == nil || g.race.Config.Scenario != reply.result.Config.Scenario
+		r, err := g.newRaceRenderer(&reply.result, view, resetCamera)
+		if err != nil {
 			g.recordError(err)
 			return
 		}
-		g.setStatus(fmt.Sprintf("%s · %d completed passes · change placement and replay", reply.result.Config.Scenario, len(reply.result.Events)))
+		// Commit all mode state only after both planning and rendering succeed.
+		g.cancelPointer()
+		if g.race == nil {
+			g.raceReturnView = g.opts.view
+			g.raceReturnRenderer = g.renderer
+		}
+		g.race = &reply.result
+		g.renderer = r
+		g.opts.view = view
+		g.clock = 0
+		g.resetCamera = false
+		status := fmt.Sprintf("%s · %d completed passes · change placement and replay", reply.result.Config.Scenario, len(reply.result.Events))
+		if reply.resetExample {
+			status = "Loaded next example · reset road, vehicle and controls · " + reply.result.Config.Scenario
+		}
+		g.setStatus(status)
 	default:
 	}
 }
 
 func (g *game) raceAction(key string) bool {
 	if key == "race-mode" {
+		planning := g.raceReplies != nil
+		if planning {
+			g.cancelRace()
+		}
 		if g.busy {
 			g.setStatus("Wait for the current plan to finish")
 			return true
 		}
 		if g.race != nil {
+			g.cancelPointer()
 			g.race = nil
 			g.clock = 0
 			g.opts.view = g.raceReturnView
 			g.renderer = g.raceReturnRenderer
 			g.raceReturnRenderer = nil
 			g.resetCamera = false
+			g.setStatus("Qualifying study restored")
+			return true
+		}
+		if planning {
+			g.cancelPointer()
+			g.setStatus("Race planning cancelled · qualifying study restored")
 			return true
 		}
 		e, err := racecraft.Example("over-under")
@@ -86,10 +126,14 @@ func (g *game) raceAction(key string) bool {
 			g.recordError(err)
 			return true
 		}
-		g.startRace(e)
+		g.startRace(e, false)
 		return true
 	}
 	if g.race == nil {
+		if g.raceReplies != nil {
+			g.setStatus("Race planning in progress · R cancels and returns to qualifying")
+			return true
+		}
 		return false
 	}
 	// Editing the qualifying study stays in qualifying mode. Race controls only
@@ -107,12 +151,14 @@ func (g *game) raceAction(key string) bool {
 		return true
 	}
 	if g.busy {
-		g.setStatus("Wait for the current race plan to finish")
+		g.setStatus("Wait for the current race plan to finish · R cancels and returns to qualifying")
 		return true
 	}
+	resetExample := false
 	e := racecraft.Experiment{Config: g.race.Config, Scene: g.race.Scene, Vehicle: g.race.Vehicle}
 	switch key {
 	case "race-scenario":
+		resetExample = true
 		names := racecraft.Scenarios()
 		for i, name := range names {
 			if name == e.Config.Scenario {
@@ -150,20 +196,25 @@ func (g *game) raceAction(key string) bool {
 			e.Config.Clearance += delta * .1
 			e.Config.Clearance = math.Round(e.Config.Clearance*10) / 10
 		default:
+			g.setStatus("Qualifying controls are inactive in race mode · R returns to qualifying")
 			return true
 		}
 	}
-	g.startRace(e)
+	g.startRace(e, resetExample)
 	return true
 }
 
-func (g *game) rebuildRace() error {
-	opts := render.Options{Width: g.opts.width, Height: g.opts.height, View: g.opts.view, Race: g.race}
-	if !g.resetCamera {
+func (g *game) newRaceRenderer(race *racecraft.Result, view string, resetCamera bool) (*render.Renderer, error) {
+	opts := render.Options{Width: g.opts.width, Height: g.opts.height, View: view, Race: race}
+	if !resetCamera {
 		camera := g.renderer.Camera()
 		opts.Camera = &camera
 	}
-	r, err := render.New(g.race.Scene, g.race.Cars[0].Path, g.race.Vehicle, opts)
+	return render.New(race.Scene, race.Cars[0].Path, race.Vehicle, opts)
+}
+
+func (g *game) rebuildRace() error {
+	r, err := g.newRaceRenderer(g.race, g.opts.view, g.resetCamera)
 	if err != nil {
 		return err
 	}

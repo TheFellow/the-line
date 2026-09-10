@@ -59,6 +59,7 @@ if (!process.argv.includes("--skip-build")) {
 }
 const html = `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#0f151d}</style></head><body><script src="/wasm_exec.js"></script><script>
 const go=new Go();const params=new URLSearchParams(location.search);go.argv=['studio','--preset',params.get('preset')||'banked','--view',params.get('view')||'2d'];
+for (const flag of ['mode','race-file','vehicle']) { if(params.has(flag)) go.argv.push('--'+flag,params.get(flag)); }
 go.exit=(code)=>{window.applicationExit=code};
 WebAssembly.instantiateStreaming(fetch('/studio.wasm'),go.importObject).then(r=>go.run(r.instance)).catch(e=>{window.bootError=String(e)});
 </script></body></html>`;
@@ -969,7 +970,7 @@ try {
         await racecraftChecks(page, c, async (name, run) => {
           currentCheck = name; console.log(`${c.name}: ${name}`);
           await run(); checks.push(name);
-        }, { state, wait, control, tick, near, key, seekTimeline, artifacts });
+        }, { state, wait, control, tick, near, key, coords, seekTimeline, artifacts, startPreset });
       }
       assert.deepEqual(errors, [], "browser errors");
       const final = await state(page);

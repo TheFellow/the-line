@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-func (g *game) chooseCSV() {
+func (g *game) chooseCSV(requests chan<- csvImport) {
 	path := g.opts.file
 	if !strings.HasSuffix(strings.ToLower(path), ".csv") {
 		path += ".csv"
@@ -20,5 +20,5 @@ func (g *game) chooseCSV() {
 		data, err = io.ReadAll(io.LimitReader(file, (2<<20)+1))
 		file.Close()
 	}
-	g.importRequests <- csvImport{data: string(data), name: strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)), err: err}
+	requests <- csvImport{data: string(data), name: strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)), err: err}
 }

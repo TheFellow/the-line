@@ -22,10 +22,8 @@ func (g *game) authoringAction(key string) bool {
 	}
 	if key == "import-csv" {
 		g.cancelPointer()
-		if g.importRequests == nil {
-			g.importRequests = make(chan csvImport, 1)
-		}
-		g.chooseCSV()
+		g.importRequests = make(chan csvImport, 1)
+		g.chooseCSV(g.importRequests)
 		return true
 	}
 	if !strings.HasPrefix(key, "road:") {
@@ -67,7 +65,7 @@ func (g *game) authoringAction(key string) bool {
 }
 
 func (g *game) updateImport() {
-	if g.importRequests == nil {
+	if g.importRequests == nil || g.busy || g.race != nil {
 		return
 	}
 	select {
