@@ -121,14 +121,24 @@ func main() {
 	ebiten.SetTPS(60)
 	// Finite runs also progress when the automation window loses focus.
 	ebiten.SetRunnableOnUnfocused(true)
-	if err := ebiten.RunGame(g); err != nil && !errors.Is(err, ebiten.Termination) {
-		log.Fatal(err)
+	runErr := ebiten.RunGame(g)
+	if errors.Is(runErr, ebiten.Termination) {
+		runErr = nil
 	}
-	if g.captureErr != nil {
-		log.Fatal(g.captureErr)
+	if runErr != nil {
+		g.recordError(runErr)
+	}
+	if o.demo && g.demoIndex < len(demoActions) {
+		g.recordError(fmt.Errorf("demo ended after %d of %d actions", g.demoIndex, len(demoActions)))
 	}
 	if err := g.writeReport(); err != nil {
 		log.Fatal(err)
+	}
+	if runErr != nil {
+		log.Fatal(runErr)
+	}
+	if g.captureErr != nil {
+		log.Fatal(g.captureErr)
 	}
 	for _, action := range g.demoLog {
 		if strings.HasPrefix(action, "ERROR:") {
@@ -141,6 +151,15 @@ func main() {
 func (g *game) Layout(_, _ int) (int, int) { return g.opts.width, g.opts.height }
 
 func (g *game) setStatus(s string) { g.status = s; g.statusUntil = time.Now().Add(7 * time.Second) }
+
+// recordError keeps interactive failures visible and makes automated failures
+// durable in the report. Ordinary rejected edits do not fail a later normal exit.
+func (g *game) recordError(err error) {
+	g.setStatus(err.Error())
+	if g.opts.demo {
+		g.demoLog = append(g.demoLog, "ERROR: "+err.Error())
+	}
+}
 
 func (g *game) rebuild() error {
 	r, err := render.New(g.solvedScene, g.result, g.config, render.Options{Width: g.opts.width, Height: g.opts.height, View: g.opts.view})
@@ -179,8 +198,7 @@ func (g *game) Update() error {
 			if g.rollback != nil {
 				g.rollback()
 			}
-			g.setStatus("Edit reverted: " + reply.err.Error())
-			g.demoLog = append(g.demoLog, "ERROR: "+reply.err.Error())
+			g.recordError(fmt.Errorf("edit reverted: %w", reply.err))
 		} else {
 			fraction := g.clock / math.Max(g.result.Duration, 1)
 			g.result, g.config = reply.result, reply.config
@@ -307,7 +325,7 @@ func (g *game) mouse() {
 		if math.Hypot(float64(x-g.dragX), float64(y-g.dragY)) > 2 {
 			p := g.renderer.Unproject(float64(x), float64(y), g.dragPosition.Z)
 			if err := g.ed.MovePoint(g.dragIndex, p); err != nil {
-				g.setStatus(err.Error())
+				g.recordError(err)
 			} else {
 				g.queueSolve(g.ed.Undo)
 			}
@@ -343,7 +361,7 @@ func (g *game) action(key string) {
 			g.opts.view = "3d"
 		}
 		if err := g.rebuild(); err != nil {
-			g.setStatus(err.Error())
+			g.recordError(err)
 		}
 		return
 	case "previous":
@@ -368,7 +386,7 @@ func (g *game) action(key string) {
 	case "save":
 		err = g.ed.Save(g.opts.file)
 		if err != nil {
-			g.setStatus(err.Error())
+			g.recordError(err)
 		} else {
 			g.setStatus("Saved " + g.opts.file)
 		}
@@ -479,10 +497,7 @@ func (g *game) action(key string) {
 		return
 	}
 	if err != nil {
-		g.setStatus(err.Error())
-		if g.opts.demo {
-			g.demoLog = append(g.demoLog, "ERROR: "+err.Error())
-		}
+		g.recordError(err)
 		return
 	}
 	g.queueSolve(rollback)
@@ -558,6 +573,9 @@ func (g *game) Draw(screen *ebiten.Image) {
 			capture := image.NewRGBA(screen.Bounds())
 			screen.ReadPixels(capture.Pix)
 			g.captureErr = savePNG(g.opts.capture, capture)
+			if g.captureErr != nil {
+				g.recordError(fmt.Errorf("capture: %w", g.captureErr))
+			}
 		}
 		g.captured = true
 	}
