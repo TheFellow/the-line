@@ -15,7 +15,15 @@ import (
 type perspectiveScene struct {
 	eye, right, up, forward track.Vec3
 	focal                   float64
-	depths                  []float64
+	depths                  []depthSample
+	frameDepths             []depthSample
+}
+
+// depthSample retains the reciprocal-depth plane at a pixel center. Lines
+// cover neighboring pixels too; comparing on this plane avoids self-occlusion
+// caused by their different sample locations on a sloping road.
+type depthSample struct {
+	inverse, dx, dy float64
 }
 
 const perspectiveNear = .2
@@ -64,7 +72,7 @@ func (r *Renderer) preparePerspective() {
 			distance = math.Max(distance, needed-dot(d, forward)+8)
 		}
 	}
-	r.perspective = &perspectiveScene{eye: target.Sub(forward.Mul(distance)), right: right, up: up, forward: forward, focal: focal, depths: make([]float64, r.viewport.Dx()*r.viewport.Dy())}
+	r.perspective = &perspectiveScene{eye: target.Sub(forward.Mul(distance)), right: right, up: up, forward: forward, focal: focal, depths: make([]depthSample, r.viewport.Dx()*r.viewport.Dy())}
 }
 func (p *perspectiveScene) camera(v track.Vec3) track.Vec3 {
 	d := v.Sub(p.eye)
@@ -102,7 +110,7 @@ func clipNear(input []track.Vec3) []track.Vec3 {
 	}
 	return out
 }
-func (r *Renderer) perspectivePolygon(im *image.RGBA, depths []float64, world []track.Vec3, col color.RGBA) {
+func (r *Renderer) perspectivePolygon(im *image.RGBA, depths []depthSample, world []track.Vec3, col color.RGBA) {
 	vertices := make([]track.Vec3, len(world))
 	for i, v := range world {
 		vertices[i] = r.perspective.camera(v)
@@ -112,13 +120,15 @@ func (r *Renderer) perspectivePolygon(im *image.RGBA, depths []float64, world []
 		r.perspectiveTriangle(im, depths, [3]track.Vec3{vertices[0], vertices[i], vertices[i+1]}, col)
 	}
 }
-func (r *Renderer) perspectiveTriangle(im *image.RGBA, depths []float64, v [3]track.Vec3, col color.RGBA) {
+func (r *Renderer) perspectiveTriangle(im *image.RGBA, depths []depthSample, v [3]track.Vec3, col color.RGBA) {
 	a, b, c := r.perspectiveScreen(v[0]), r.perspectiveScreen(v[1]), r.perspectiveScreen(v[2])
 	cross := func(a, b, p point) float64 { return (b.x-a.x)*(p.y-a.y) - (b.y-a.y)*(p.x-a.x) }
 	area := cross(a, b, c)
 	if math.Abs(area) < 1e-9 {
 		return
 	}
+	gradientX := ((b.y-c.y)/v[0].Z + (c.y-a.y)/v[1].Z + (a.y-b.y)/v[2].Z) / area
+	gradientY := ((c.x-b.x)/v[0].Z + (a.x-c.x)/v[1].Z + (b.x-a.x)/v[2].Z) / area
 	bounds := image.Rect(int(math.Floor(math.Min(a.x, math.Min(b.x, c.x)))), int(math.Floor(math.Min(a.y, math.Min(b.y, c.y)))), int(math.Ceil(math.Max(a.x, math.Max(b.x, c.x))))+1, int(math.Ceil(math.Max(a.y, math.Max(b.y, c.y))))+1).Intersect(r.viewport)
 	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
 		for x := bounds.Min.X; x < bounds.Max.X; x++ {
@@ -130,14 +140,14 @@ func (r *Renderer) perspectiveTriangle(im *image.RGBA, depths []float64, v [3]tr
 			}
 			depth := wa/v[0].Z + wb/v[1].Z + wc/v[2].Z
 			idx := (y-r.viewport.Min.Y)*r.viewport.Dx() + x - r.viewport.Min.X
-			if depth >= depths[idx]-1e-10 {
-				depths[idx] = depth
+			if depth >= depths[idx].inverse-1e-10 {
+				depths[idx] = depthSample{inverse: depth, dx: gradientX, dy: gradientY}
 				im.SetRGBA(x, y, col)
 			}
 		}
 	}
 }
-func (r *Renderer) perspectiveLine(im *image.RGBA, depths []float64, a, b track.Vec3, width float64, col color.RGBA) {
+func (r *Renderer) perspectiveLine(im *image.RGBA, depths []depthSample, a, b track.Vec3, width float64, col color.RGBA) {
 	ca, cb := r.perspective.camera(a), r.perspective.camera(b)
 	if ca.Z < perspectiveNear && cb.Z < perspectiveNear {
 		return
@@ -176,7 +186,8 @@ func (r *Renderer) perspectiveLine(im *image.RGBA, depths []float64, a, b track.
 	radius := max(0, int(width/2))
 	for i := 0; i <= steps; i++ {
 		u := lo + (hi-lo)*float64(i)/float64(steps)
-		x, y := int(math.Round(pa.x+dx*u)), int(math.Round(pa.y+dy*u))
+		sampleX, sampleY := pa.x+dx*u, pa.y+dy*u
+		x, y := int(math.Floor(sampleX)), int(math.Floor(sampleY))
 		depth := (1-u)/ca.Z + u/cb.Z
 		for oy := -radius; oy <= radius; oy++ {
 			for ox := -radius; ox <= radius; ox++ {
@@ -185,7 +196,11 @@ func (r *Renderer) perspectiveLine(im *image.RGBA, depths []float64, a, b track.
 					continue
 				}
 				idx := (py-r.viewport.Min.Y)*r.viewport.Dx() + px - r.viewport.Min.X
-				if depth >= depths[idx]-1e-6 {
+				surface := depths[idx]
+				// Evaluate the occluding plane at the line sample, not the
+				// covered pixel center. This is exact for a planar triangle.
+				occluder := surface.inverse + surface.dx*(sampleX-float64(px)-.5) + surface.dy*(sampleY-float64(py)-.5)
+				if depth >= occluder-1e-10 {
 					im.SetRGBA(px, py, col)
 				}
 			}
@@ -256,7 +271,7 @@ func (r *Renderer) perspectiveRoad(im *image.RGBA) {
 	r.text(im, r.viewport.Min.X+16, r.viewport.Min.Y+25, "TRACKSIDE / PERSPECTIVE", 12, ink, true)
 	r.text(im, r.viewport.Min.X+16, r.viewport.Min.Y+44, "Watch only · transport and plots remain interactive", 11, muted, false)
 }
-func (r *Renderer) perspectiveCar(im *image.RGBA, depths []float64, n, a, b solver.Node, ghost bool) {
+func (r *Renderer) perspectiveCar(im *image.RGBA, depths []depthSample, n, a, b solver.Node, ghost bool) {
 	forward := b.Position.Sub(a.Position)
 	forward.Z = 0
 	if forward.Length() < 1e-6 {
@@ -285,7 +300,11 @@ func (r *Renderer) perspectiveCar(im *image.RGBA, depths []float64, n, a, b solv
 	r.perspectiveLine(im, depths, roof.Sub(forward.Mul(.5)), roof.Add(forward.Mul(.6)), 2, bg)
 }
 func (r *Renderer) perspectiveFrame(im *image.RGBA, t float64, n solver.Node, state State) {
-	depths := append([]float64(nil), r.perspective.depths...)
+	if len(r.perspective.frameDepths) != len(r.perspective.depths) {
+		r.perspective.frameDepths = make([]depthSample, len(r.perspective.depths))
+	}
+	depths := r.perspective.frameDepths
+	copy(depths, r.perspective.depths)
 	if state.Comparison && r.referenceCompatible() {
 		headingTime := t
 		if !r.result.Closed {
