@@ -1,6 +1,8 @@
 package render
 
 import (
+	"bytes"
+	"image"
 	"math"
 	"testing"
 
@@ -120,6 +122,32 @@ func TestCameraPreservedAcrossRendererRebuild(t *testing.T) {
 		xx, yy := rebuilt.Project(p.Position())
 		if x != xx || y != yy {
 			t.Fatal("rebuild moved an unchanged world point")
+		}
+	}
+}
+
+func TestCameraMotionCannotPaintOutsideRoadViewport(t *testing.T) {
+	r := fixture(t, "3d")
+	before := append([]byte(nil), r.Frame(2).(*image.RGBA).Pix...)
+	c := r.Camera()
+	c.Zoom *= 5
+	c.PanX, c.PanY = 380, -180
+	if err := r.SetCamera(c); err != nil {
+		t.Fatal(err)
+	}
+	after := r.Frame(2).(*image.RGBA)
+	// The display output is filtered at non-native sizes. Leave two pixels at
+	// the clipping edge for interpolation while checking every UI pixel.
+	road := r.RoadViewport().Inset(-2)
+	for y := after.Bounds().Min.Y; y < after.Bounds().Max.Y; y++ {
+		for x := after.Bounds().Min.X; x < after.Bounds().Max.X; x++ {
+			if image.Pt(x, y).In(road) {
+				continue
+			}
+			i := after.PixOffset(x, y)
+			if !bytes.Equal(before[i:i+4], after.Pix[i:i+4]) {
+				t.Fatalf("camera-painted geometry escaped road viewport at %d,%d", x, y)
+			}
 		}
 	}
 }

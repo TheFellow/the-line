@@ -10,10 +10,11 @@ import (
 )
 
 type cameraGesture struct {
-	start  render.Camera
-	x, y   float64
-	button ebiten.MouseButton
-	orbit  bool
+	start        render.Camera
+	x, y         float64
+	lastX, lastY float64
+	button       ebiten.MouseButton
+	orbit        bool
 }
 
 // cameraMouse owns its gesture until release, even after leaving the road area.
@@ -50,11 +51,12 @@ func (g *game) cameraMouse(x, y float64) bool {
 			c.PanX += dx
 			c.PanY += dy
 		}
-		if c != g.renderer.Camera() {
+		if (x != drag.lastX || y != drag.lastY) && c != g.renderer.Camera() {
 			if err := g.renderer.SetCamera(c); err != nil {
 				g.recordError(err)
 			}
 		}
+		drag.lastX, drag.lastY = x, y
 		if inpututil.IsMouseButtonJustReleased(drag.button) || !ebiten.IsMouseButtonPressed(drag.button) {
 			g.cameraDrag = nil
 		}
@@ -77,7 +79,7 @@ func (g *game) cameraMouse(x, y float64) bool {
 		} else if right {
 			button = ebiten.MouseButtonRight
 		}
-		g.cameraDrag = &cameraGesture{start: g.renderer.Camera(), x: x, y: y, button: button, orbit: orbit && !pan}
+		g.cameraDrag = &cameraGesture{start: g.renderer.Camera(), x: x, y: y, lastX: x, lastY: y, button: button, orbit: orbit && !pan}
 		g.hover = -1
 		return true
 	}
