@@ -105,7 +105,7 @@ func (r *Renderer) instrumentationBase(im *image.RGBA) {
 		}
 		line(im, point{float64(250 + x), 596}, point{float64(250 + x), 600}, 1, speedColor(u))
 	}
-	r.text(im, 414, 601, "fixed scale · ends clipped", 11, muted, false)
+	r.text(im, 414, 601, "shared scale", 11, muted, false)
 	r.text(im, 720, 595, "B brake · A speed apex · T tyre drive", 11, muted, false)
 }
 
