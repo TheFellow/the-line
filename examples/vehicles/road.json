@@ -1,0 +1,12 @@
+{
+  "name": "Club Sport · RWD",
+  "mass": 1250,
+  "power": 155000,
+  "brake": 10,
+  "max_speed": 65,
+  "grip": 1.05,
+  "drag_area": 0.66,
+  "front_weight": 0.52,
+  "front_drive": 0,
+  "width": 1.8
+}

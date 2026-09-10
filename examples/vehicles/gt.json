@@ -1,0 +1,12 @@
+{
+  "name": "GT Prototype · RWD",
+  "mass": 1180,
+  "power": 390000,
+  "brake": 14,
+  "max_speed": 88,
+  "grip": 1.45,
+  "drag_area": 0.82,
+  "front_weight": 0.45,
+  "front_drive": 0,
+  "width": 1.95
+}

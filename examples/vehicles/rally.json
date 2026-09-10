@@ -1,0 +1,12 @@
+{
+  "name": "Rally Cross · AWD",
+  "mass": 1320,
+  "power": 235000,
+  "brake": 11,
+  "max_speed": 62,
+  "grip": 1.1,
+  "drag_area": 0.8,
+  "front_weight": 0.57,
+  "front_drive": 0.45,
+  "width": 1.85
+}

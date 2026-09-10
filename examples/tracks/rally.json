@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "name": "Ridge to River",
+  "vehicle": "rally",
+  "entry_speed_cap": 28,
+  "exit_speed_cap": 40,
+  "points": [
+    {
+      "x": -145,
+      "y": -35,
+      "z": 0,
+      "width": 9,
+      "bank": 0,
+      "surface": "asphalt"
+    },
+    {
+      "x": -100,
+      "y": -35,
+      "z": 3,
+      "width": 9,
+      "bank": 0,
+      "surface": "asphalt"
+    },
+    {
+      "x": -60,
+      "y": -10,
+      "z": 8,
+      "width": 9,
+      "bank": -4,
+      "surface": "asphalt"
+    },
+    {
+      "x": -25,
+      "y": 25,
+      "z": 13,
+      "width": 9,
+      "bank": -5,
+      "surface": "gravel"
+    },
+    {
+      "x": 15,
+      "y": 25,
+      "z": 14,
+      "width": 9,
+      "bank": 0,
+      "surface": "gravel"
+    },
+    {
+      "x": 50,
+      "y": -10,
+      "z": 10,
+      "width": 9,
+      "bank": 4,
+      "surface": "gravel"
+    },
+    {
+      "x": 80,
+      "y": -35,
+      "z": 5,
+      "width": 9,
+      "bank": 3,
+      "surface": "gravel"
+    },
+    {
+      "x": 115,
+      "y": -20,
+      "z": 1,
+      "width": 9,
+      "bank": -3,
+      "surface": "dirt"
+    },
+    {
+      "x": 145,
+      "y": 20,
+      "z": 0,
+      "width": 9,
+      "bank": -3,
+      "surface": "dirt"
+    },
+    {
+      "x": 190,
+      "y": 35,
+      "z": 2,
+      "width": 9,
+      "bank": 0,
+      "surface": "dirt"
+    }
+  ]
+}

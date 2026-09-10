@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "name": "Double Apex",
+  "vehicle": "road",
+  "entry_speed_cap": 38,
+  "exit_speed_cap": 55,
+  "points": [
+    {
+      "x": -135,
+      "y": -65,
+      "z": 0,
+      "width": 12,
+      "bank": 0,
+      "surface": "asphalt"
+    },
+    {
+      "x": -80,
+      "y": -65,
+      "z": 0,
+      "width": 12,
+      "bank": 0,
+      "surface": "asphalt"
+    },
+    {
+      "x": -30,
+      "y": -55,
+      "z": 0,
+      "width": 12,
+      "bank": 0,
+      "surface": "asphalt"
+    },
+    {
+      "x": 5,
+      "y": -30,
+      "z": 0,
+      "width": 12,
+      "bank": 0,
+      "surface": "asphalt"
+    },
+    {
+      "x": 12,
+      "y": 5,
+      "z": 0,
+      "width": 12,
+      "bank": 0,
+      "surface": "asphalt"
+    },
+    {
+      "x": -5,
+      "y": 40,
+      "z": 0,
+      "width": 12,
+      "bank": 0,
+      "surface": "asphalt"
+    },
+    {
+      "x": 8,
+      "y": 75,
+      "z": 0,
+      "width": 12,
+      "bank": 0,
+      "surface": "asphalt"
+    },
+    {
+      "x": 45,
+      "y": 90,
+      "z": 0,
+      "width": 12,
+      "bank": 0,
+      "surface": "asphalt"
+    },
+    {
+      "x": 105,
+      "y": 90,
+      "z": 0,
+      "width": 12,
+      "bank": 0,
+      "surface": "asphalt"
+    }
+  ]
+}

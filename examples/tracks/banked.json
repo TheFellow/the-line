@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "name": "Highline Sweep",
+  "vehicle": "road",
+  "entry_speed_cap": 38,
+  "exit_speed_cap": 55,
+  "points": [
+    {
+      "x": -135,
+      "y": -65,
+      "z": 0,
+      "width": 12,
+      "bank": -12,
+      "surface": "asphalt"
+    },
+    {
+      "x": -85,
+      "y": -65,
+      "z": 1.6,
+      "width": 12,
+      "bank": -12,
+      "surface": "asphalt"
+    },
+    {
+      "x": -35,
+      "y": -55,
+      "z": 3.2,
+      "width": 12,
+      "bank": -12,
+      "surface": "asphalt"
+    },
+    {
+      "x": 10,
+      "y": -30,
+      "z": 4.800000000000001,
+      "width": 12,
+      "bank": -12,
+      "surface": "asphalt"
+    },
+    {
+      "x": 40,
+      "y": 10,
+      "z": 6.4,
+      "width": 12,
+      "bank": -12,
+      "surface": "asphalt"
+    },
+    {
+      "x": 45,
+      "y": 55,
+      "z": 8,
+      "width": 12,
+      "bank": -12,
+      "surface": "asphalt"
+    },
+    {
+      "x": 25,
+      "y": 95,
+      "z": 9.600000000000001,
+      "width": 12,
+      "bank": -12,
+      "surface": "asphalt"
+    },
+    {
+      "x": -15,
+      "y": 120,
+      "z": 11.200000000000001,
+      "width": 12,
+      "bank": -12,
+      "surface": "asphalt"
+    },
+    {
+      "x": -75,
+      "y": 125,
+      "z": 12.8,
+      "width": 12,
+      "bank": -12,
+      "surface": "asphalt"
+    }
+  ]
+}
