@@ -64,7 +64,7 @@ export async function instrumentationChecks(page, c, check, h) {
       near(s.forceCursor[0], ox + (410 + force.lateral_mps2 / envelopeScale * 31) * displayScale, `${name} lateral force dot`);
       near(s.forceCursor[1], oy + (839 - force.longitudinal_mps2 / envelopeScale * 31) * displayScale, `${name} longitudinal force dot`);
       near(s.chartCursor[0], ox + (82 + (sampledStation - first) / (last - first) * 996) * displayScale, `${name} chart station`, .01);
-      near(s.chartCursor[1], oy + (722 - force.utilization * 76) * displayScale, `${name} utilization cursor`);
+      near(s.chartCursor[1], oy + (722 - Math.max(0, Math.min(1, force.utilization)) * 76) * displayScale, `${name} utilization cursor`);
       await page.screenshot({ path: path.join(artifacts, `${c.name}-forces-${name}.png`) });
     }
     // Restore the default channel for subsequent interaction scenarios.

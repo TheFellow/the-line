@@ -68,6 +68,11 @@ func TestInstrumentationSharedScalesAndCursors(t *testing.T) {
 					t.Fatal("force widget disagrees with current car")
 				}
 			}
+			extreme := run.Nodes[0]
+			extreme.Speed = 200
+			if r.chartPoint(extreme).y != float64(r.controls["chart"].Min.Y) {
+				t.Fatal("clipped speed cursor escaped chart into the road")
+			}
 		}
 	}
 }
