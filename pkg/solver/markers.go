@@ -87,6 +87,9 @@ func DetectMarkers(nodes []Node) []Marker {
 	for a, apex := range apexes {
 		add("apex", apex)
 		drove, brake := false, -1
+		if a == 0 && sustained(0, "brake") {
+			brake = 0
+		}
 		for i := previous; i < apex; i++ {
 			if sustained(i, "drive") {
 				drove = true

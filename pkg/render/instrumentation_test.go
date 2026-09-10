@@ -37,7 +37,7 @@ func TestInstrumentationSharedScalesAndCursors(t *testing.T) {
 				if r.LineColorMode() != channel || r.ChartChannel() != channel {
 					t.Fatal("channel cycle order changed")
 				}
-				low, high, _ := channel.scale()
+				low, high, _ := r.ChartScale()
 				p := r.chartPoint(n)
 				wantY := 722 - (channel.value(n)-low)/(high-low)*76
 				if p.x != x || math.Abs(p.y-wantY) > 1e-10 {
@@ -91,5 +91,29 @@ func TestFixedColorScaleDoesNotDependOnRunExtrema(t *testing.T) {
 	}
 	if SpeedChannel.color(solver.Node{Speed: 0}) == SpeedChannel.color(solver.Node{Speed: 300 / 3.6}) {
 		t.Fatal("speed color scale is not legible")
+	}
+}
+
+func TestSpeedChartFitsBothFullTracesAndRemainsStable(t *testing.T) {
+	bounds := speedChartBounds([]solver.Node{{Speed: 70 / 3.6}, {Speed: 150 / 3.6}}, []solver.Node{{Speed: 60 / 3.6}, {Speed: 170 / 3.6}})
+	if bounds[0] >= 60 || bounds[1] <= 170 || bounds[1]-bounds[0] >= 300 {
+		t.Fatalf("unhelpful shared scale: %v", bounds)
+	}
+	s, result, car := comparisonFixture(t)
+	r, err := New(s, result, car, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	low, high, _ := r.ChartScale()
+	for _, elapsed := range []float64{0, result.Duration / 2, result.Duration} {
+		r.FrameWithState(elapsed, State{Comparison: true})
+		a, b, _ := r.ChartScale()
+		if a != low || b != high {
+			t.Fatal("scrubbing changed the comparison scale")
+		}
+	}
+	flat := speedChartBounds([]solver.Node{{Speed: 30}, {Speed: 30}})
+	if flat[0] >= 108 || flat[1] <= 108 {
+		t.Fatal("constant-speed trace lacks headroom")
 	}
 }

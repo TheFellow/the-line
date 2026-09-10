@@ -16,3 +16,10 @@ Validation run on the implementation:
 `tools/browser/instrumentation.mjs` supplies real-input checks for both display configurations: all mode controls must preserve the numerical trajectory and clock, then chart inspection at entry/apex/exit verifies the force dot and chart cursor against the displayed channels. It captures all four modes and three inspection stations. The final integrated headless validation record belongs in [VALIDATION.md](VALIDATION.md).
 
 The original roadmap's example “power-limited then speed-cap-limited on the entry straight” is not guaranteed on every preset: an upcoming corner can require braking before maximum speed is reached. The active-bound flag reports the actual model state. Likewise, additional local minima in an optimized profile remain visible; the marker detector does not manufacture one idealized apex per drawn corner. Force channels on archived JSON queries without a live model are interpolated estimates; reevaluate saved line offsets to recover exact force queries.
+
+The speed chart fits the union of the complete current and compatible reference
+traces, with headroom and rounded bounds. Those bounds remain fixed while
+playing or scrubbing that comparison. Line colors retain their absolute scale;
+grip and signed-g chart axes also retain absolute scales. A sequence already
+braking into its first detected corner now receives an entry brake marker when
+that initial braking lasts at least 2 m; a preceding drive run is not required.

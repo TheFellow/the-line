@@ -10,7 +10,7 @@ import (
 	"github.com/TheFellow/the-line/pkg/vehicle"
 )
 
-// Channel selects an absolute display scale shared by cars and trajectories.
+// Channel selects a physical quantity shared by cars and trajectories.
 type Channel string
 
 const (
@@ -241,4 +241,43 @@ func limitLabel(s string) string {
 	default:
 		return "unavailable"
 	}
+}
+
+// ChartScale is stable throughout playback and scrubbing. Speed uses both
+// complete trajectories; force channels retain their absolute physical scales.
+func (r *Renderer) ChartScale() (low, high float64, unit string) {
+	if r.opts.ChartChannel == SpeedChannel {
+		return r.speedChartScale[0], r.speedChartScale[1], "km/h"
+	}
+	return r.opts.ChartChannel.scale()
+}
+
+func speedChartBounds(traces ...[]solver.Node) [2]float64 {
+	low, high := math.Inf(1), math.Inf(-1)
+	for _, nodes := range traces {
+		for _, n := range nodes {
+			v := n.Speed * 3.6
+			if !math.IsNaN(v) && !math.IsInf(v, 0) {
+				low, high = math.Min(low, v), math.Max(high, v)
+			}
+		}
+	}
+	if math.IsInf(low, 1) {
+		return [2]float64{0, 100}
+	}
+	padding := math.Max(5, (high-low)*.1)
+	low, high = math.Max(0, low-padding), high+padding
+	// Two tick intervals, rounded to a 1/2/5 step with useful headroom.
+	raw := (high - low) / 2
+	base := math.Pow(10, math.Floor(math.Log10(raw)))
+	step := 10 * base
+	for _, factor := range []float64{1, 2, 5, 10} {
+		if factor*base >= raw {
+			step = factor * base
+			break
+		}
+	}
+	low = math.Floor(low/step) * step
+	high = math.Ceil(high/step) * step
+	return [2]float64{low, high}
 }

@@ -34,7 +34,7 @@ func (r *Renderer) ChartStation(x float64) float64 {
 func (r *Renderer) chartPoint(n solver.Node) point {
 	rect := r.controls["chart"]
 	first, last := r.result.Nodes[0].Station, r.result.Nodes[len(r.result.Nodes)-1].Station
-	low, high, _ := r.opts.ChartChannel.scale()
+	low, high, _ := r.ChartScale()
 	level := math.Max(0, math.Min(1, (r.opts.ChartChannel.value(n)-low)/(high-low)))
 	return point{float64(rect.Min.X) + (n.Station-first)/math.Max(last-first, 1e-9)*float64(rect.Dx()), float64(rect.Max.Y) - level*float64(rect.Dy())}
 }
@@ -50,7 +50,7 @@ func (r *Renderer) comparisonBase(im *image.RGBA) {
 		line(im, point{float64(x), 631}, point{float64(x + 4), 631}, 2, referenceColor)
 	}
 	r.text(im, 363, 636, "B · "+truncate(r.referenceName(), 22), 11, referenceColor, false)
-	low, high, unit := r.opts.ChartChannel.scale()
+	low, high, unit := r.ChartScale()
 	r.text(im, 43, 752, unit+" · drag plot to inspect", 11, muted, false)
 	r.button(im, "chart-channel", image.Rect(914, 619, 1078, 641), "PLOT: "+r.opts.ChartChannel.label(), false)
 	for j := 0; j <= 2; j++ {

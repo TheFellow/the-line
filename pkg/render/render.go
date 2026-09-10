@@ -65,6 +65,7 @@ type point struct{ x, y float64 }
 
 // Renderer owns a cached static scene. It is not safe for concurrent calls.
 type Renderer struct {
+	speedChartScale                  [2]float64
 	perspective                      *perspectiveScene
 	markers                          []solver.Marker
 	scene                            track.Scene
@@ -154,6 +155,7 @@ func New(scene track.Scene, result solver.Result, config vehicle.Config, opts Op
 	} else if err := r.setCamera(*opts.Camera); err != nil {
 		return nil, err
 	}
+	r.speedChartScale = speedChartBounds(result.Nodes, r.referenceNodes())
 	r.markers = solver.DetectMarkers(result.Nodes)
 	r.drawBase()
 	return r, nil
