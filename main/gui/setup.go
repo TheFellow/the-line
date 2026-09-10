@@ -91,11 +91,11 @@ func (g *game) setupAction(key string) bool {
 
 func (g *game) startSolve(rollback func(), progressive bool) {
 	sceneNow := g.ed.Scene()
-	if g.manualMode && (sceneNow.Study == nil || sceneNow.Study.Manual == nil || sceneNow.Study.Manual.RoadDigest != track.RoadDigest(sceneNow)) {
+	if g.manualMode && !activeManual(sceneNow) {
 		g.manualMode = false
 		g.manualFailure = nil
 	}
-	if g.manualMode && sceneNow.Study != nil && sceneNow.Study.Manual != nil && sceneNow.Study.Manual.RoadDigest == track.RoadDigest(sceneNow) {
+	if activeManual(sceneNow) {
 		g.evaluateManual(rollback, sceneNow.Study.Manual.Offsets)
 		return
 	}
@@ -198,6 +198,7 @@ func (g *game) acceptReplies() error {
 					g.rollback()
 				}
 				g.result, g.config, g.solvedScene = g.oldResult, g.oldConfig, g.oldScene
+				g.manualMode = g.manualMode && activeManual(g.ed.Scene())
 				if err := g.rebuild(); err != nil {
 					return err
 				}

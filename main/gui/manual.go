@@ -15,6 +15,25 @@ import (
 	"github.com/TheFellow/the-line/pkg/track"
 )
 
+func activeManual(scene track.Scene) bool {
+	return scene.Study.UsesManual() && scene.Study.Manual.RoadDigest == track.RoadDigest(scene)
+}
+
+// selectOptimized records line selection in the same history as its hypothesis.
+// Hiding authoring handles alone deliberately does not change this selection.
+func (g *game) selectOptimized() (func(), error) {
+	restore := g.ed.Checkpoint()
+	scene := g.ed.Scene()
+	if scene.Study.UsesManual() {
+		scene.Study.ActiveLine = track.LineOptimized
+		if err := g.ed.Replace(scene); err != nil {
+			return nil, err
+		}
+	}
+	g.manualMode = false
+	return restore, nil
+}
+
 func (g *game) syncReference() error {
 	var saved *track.PinnedLine
 	if s := g.ed.Scene().Study; s != nil {
@@ -109,8 +128,12 @@ func (g *game) manualAction(key string) bool {
 		g.solvedScene = g.ed.Scene()
 		g.setStatus("Reference reset to the current car's centreline")
 	case "manual-optimize":
-		g.manualMode = false
-		g.startSolve(g.ed.Checkpoint(), true)
+		restore, err := g.selectOptimized()
+		if err != nil {
+			g.recordError(err)
+			return true
+		}
+		g.startSolve(restore, true)
 	case "manual":
 		g.manualMode = !g.manualMode
 		if g.manualMode {
@@ -118,7 +141,16 @@ func (g *game) manualAction(key string) bool {
 			if scene.Study.Manual == nil || scene.Study.Manual.RoadDigest != track.RoadDigest(scene) {
 				g.commitManual(make([]float64, len(g.result.Road)))
 			} else {
-				g.evaluateManual(g.ed.Checkpoint(), scene.Study.Manual.Offsets)
+				restore := g.ed.Checkpoint()
+				if !scene.Study.UsesManual() {
+					scene.Study.ActiveLine = track.LineManual
+					if err := g.ed.Replace(scene); err != nil {
+						g.manualMode = false
+						g.recordError(err)
+						return true
+					}
+				}
+				g.evaluateManual(restore, scene.Study.Manual.Offsets)
 			}
 		}
 	case "manual-zero":
@@ -136,6 +168,7 @@ func (g *game) commitManual(offsets []float64) {
 	if scene.Study == nil {
 		scene.Study = &track.Study{Version: 1}
 	}
+	scene.Study.ActiveLine = track.LineManual
 	scene.Study.Manual = &track.ManualLine{Spacing: g.result.Spacing, RoadDigest: track.RoadDigest(scene), Offsets: append([]float64(nil), offsets...)}
 	if err := g.ed.Replace(scene); err != nil {
 		g.recordError(err)

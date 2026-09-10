@@ -30,9 +30,13 @@ func (g *game) presentationAction(key string) bool {
 			return true
 		}
 		g.cancelPointer()
-		g.manualMode = false
+		restore, err := g.selectOptimized()
+		if err != nil {
+			g.recordError(err)
+			return true
+		}
 		g.polishNext = 1
-		g.startSolve(g.ed.Checkpoint(), true)
+		g.startSolve(restore, true)
 		return true
 	case "watch":
 		g.cancelPointer()

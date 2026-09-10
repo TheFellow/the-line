@@ -159,7 +159,7 @@ func main() {
 	if err := g.syncReference(); err != nil {
 		log.Fatal(err)
 	}
-	if s.Study != nil && s.Study.Manual != nil && s.Study.Manual.RoadDigest == track.RoadDigest(s) {
+	if activeManual(s) {
 		evalOpts := solver.DefaultOptions()
 		evalOpts.Spacing = s.Study.Manual.Spacing
 		g.result, err = solver.Evaluate(s, v, s.Study.Manual.Offsets, evalOpts)
@@ -679,7 +679,7 @@ func (g *game) action(key string) {
 	}
 	if key == "load" || key == "new" || key == "preset" || key == "undo" || key == "redo" {
 		loaded := g.ed.Scene()
-		g.manualMode = loaded.Study != nil && loaded.Study.Manual != nil && loaded.Study.Manual.RoadDigest == track.RoadDigest(loaded)
+		g.manualMode = activeManual(loaded)
 	}
 	g.resetCamera = key == "load" || key == "new" || key == "preset"
 	g.queueSolve(rollback)
