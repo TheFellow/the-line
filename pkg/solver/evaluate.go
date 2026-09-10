@@ -10,6 +10,7 @@ import (
 )
 
 func (e evaluator) cancelled() error {
+	cooperate()
 	if e.ctx != nil {
 		return e.ctx.Err()
 	}
