@@ -5,6 +5,8 @@ package track
 import (
 	"fmt"
 	"math"
+
+	"github.com/TheFellow/the-line/pkg/vehicle"
 )
 
 const Version = 1
@@ -28,12 +30,14 @@ type Point struct {
 func (p Point) Position() Vec3 { return Vec3{p.X, p.Y, p.Z} }
 
 type Scene struct {
-	Version    int     `json:"version"`
-	Name       string  `json:"name"`
-	Vehicle    string  `json:"vehicle"`
-	EntrySpeed float64 `json:"entry_speed_cap"`
-	ExitSpeed  float64 `json:"exit_speed_cap"`
-	Points     []Point `json:"points"`
+	VehicleConfig *vehicle.Config `json:"vehicle_config,omitempty"`
+	Study         *Study          `json:"study,omitempty"`
+	Version       int             `json:"version"`
+	Name          string          `json:"name"`
+	Vehicle       string          `json:"vehicle"`
+	EntrySpeed    float64         `json:"entry_speed_cap"`
+	ExitSpeed     float64         `json:"exit_speed_cap"`
+	Points        []Point         `json:"points"`
 }
 
 type Surface struct {
@@ -56,6 +60,16 @@ func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
 
 // Validate checks the serialized fields. SampleRoad also validates the interpolated ribbon.
 func (s Scene) Validate() error {
+	if s.VehicleConfig != nil {
+		if err := s.VehicleConfig.Validate(); err != nil {
+			return err
+		}
+	}
+	if s.Study != nil {
+		if err := s.Study.Validate(); err != nil {
+			return err
+		}
+	}
 	if s.Version != Version {
 		return fmt.Errorf("track: unsupported version %d (want %d)", s.Version, Version)
 	}
