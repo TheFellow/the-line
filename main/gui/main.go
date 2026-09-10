@@ -36,8 +36,10 @@ type options struct {
 type solved struct {
 	result      solver.Result
 	config      vehicle.Config
+	scene       track.Scene
 	err         error
 	generation  int
+	freshSearch string
 	provisional bool
 	sensitivity []solver.Sensitivity
 	analysis    bool
@@ -69,11 +71,8 @@ type game struct {
 	generation           int
 	sensitivity          []solver.Sensitivity
 	analyzing            bool
-	oldResult            solver.Result
-	oldConfig            vehicle.Config
-	oldScene             track.Scene
+	checkpoint           *solveCheckpoint
 	solveRequests        int
-	rollback             func()
 	playing              bool
 	clock                float64
 	status               string

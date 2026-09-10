@@ -181,10 +181,7 @@ func (g *game) evaluateManual(rollback func(), offsets []float64) {
 	if g.cancelSolve != nil {
 		g.cancelSolve()
 	}
-	if !g.busy {
-		g.rollback = rollback
-		g.oldResult, g.oldConfig, g.oldScene = g.result, g.config, g.solvedScene
-	}
+	g.checkpointSolve(rollback)
 	g.generation++
 	g.solveRequests++
 	g.busy = true
@@ -200,7 +197,7 @@ func (g *game) evaluateManual(rollback func(), offsets []float64) {
 	go func() {
 		result, err := solver.EvaluateContext(ctx, scene, config, offsets, opts)
 		select {
-		case g.replies <- solved{generation: generation, result: result, config: config, err: err}:
+		case g.replies <- solved{generation: generation, result: result, config: config, scene: scene, err: err}:
 		case <-ctx.Done():
 		}
 	}()

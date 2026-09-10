@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/TheFellow/the-line/internal/editor"
 	"github.com/TheFellow/the-line/pkg/render"
 	"github.com/TheFellow/the-line/pkg/solver"
 	"github.com/TheFellow/the-line/pkg/track"
@@ -68,6 +69,9 @@ func (g *game) setupAction(key string) bool {
 				if field.Key == "front_brake" && value == 0 && step > 0 {
 					step = .5 // Start a fixed bias at balanced braking.
 				}
+				if field.Key == "lift_area" && value == 0 && step > 0 && car.AeroBalance == 0 {
+					car.AeroBalance = car.FrontWeight
+				}
 				car, err = car.With(field.Key, value+step)
 				car.Name = "Custom · " + g.ed.Scene().Vehicle
 				break
@@ -89,6 +93,29 @@ func (g *game) setupAction(key string) bool {
 	return true
 }
 
+// A checkpoint belongs to one committed edit, including edits that supersede
+// unfinished work. Recovering an unfinished predecessor resumes its solve;
+// restoring an older displayed trajectory alone would lose that valid edit.
+type solveCheckpoint struct {
+	rollback func()
+	previous *solveCheckpoint
+	result   solver.Result
+	config   vehicle.Config
+	scene    track.Scene
+}
+
+func (g *game) checkpointSolve(rollback func()) {
+	if rollback == nil { // Resuming a predecessor keeps its original checkpoint.
+		return
+	}
+	var previous *solveCheckpoint
+	if g.busy {
+		previous = g.checkpoint
+	}
+	g.checkpoint = &solveCheckpoint{rollback: rollback, previous: previous,
+		result: g.result, config: g.config, scene: g.solvedScene}
+}
+
 func (g *game) startSolve(rollback func(), progressive bool) {
 	sceneNow := g.ed.Scene()
 	if g.manualMode && !activeManual(sceneNow) {
@@ -102,12 +129,7 @@ func (g *game) startSolve(rollback func(), progressive bool) {
 	if g.cancelSolve != nil {
 		g.cancelSolve()
 	}
-	if !g.busy {
-		g.rollback = rollback
-		g.oldResult = g.result
-		g.oldConfig = g.config
-		g.oldScene = g.solvedScene
-	}
+	g.checkpointSolve(rollback)
 	g.solveRequests++
 	g.generation++
 	generation := g.generation
@@ -122,6 +144,7 @@ func (g *game) startSolve(rollback func(), progressive bool) {
 	g.setStatus("Computing a feasible line… playback continues")
 	send := func(reply solved) bool {
 		reply.generation = generation
+		reply.scene = scene
 		select {
 		case g.replies <- reply:
 			return true
@@ -152,23 +175,26 @@ func (g *game) startSolve(rollback func(), progressive bool) {
 				if sampleErr == nil {
 					opts.Seed, _ = current.OffsetsAt(road)
 				}
+			} else if !send(solved{freshSearch: "Current line no longer fits; finding a fresh line…"}) {
+				return
 			}
 		}
-		r, err := solver.SolveContext(ctx, scene, config, opts)
-		if err != nil && len(opts.Seed) > 0 && ctx.Err() == nil {
-			// Coarse interpolation can invalidate an otherwise verified fine
-			// line. Retry without that seed before retaining the provisional.
-			opts.Seed = nil
-			r, err = solver.SolveContext(ctx, scene, config, opts)
-		}
+		r, err := editor.SolveSetup(ctx, scene, config, opts, func() {
+			send(solved{freshSearch: "Warm-start line no longer fits; finding a fresh line…"})
+		})
 		if provisional != nil && (err != nil || r.Duration > provisional.Duration) && ctx.Err() == nil {
 			search := r
 			r = *provisional
-			r.Candidates = search.Candidates
-			r.FineCandidates = search.FineCandidates
-			r.SearchWorkers = search.SearchWorkers
-			r.PolishCandidates = search.PolishCandidates
-			r.Termination = "retained faster verified current line"
+			if err != nil {
+				r.Termination = "retained verified current line; search failed: " + err.Error()
+			} else {
+				r.Iterations = search.Iterations
+				r.Candidates = search.Candidates
+				r.FineCandidates = search.FineCandidates
+				r.SearchWorkers = search.SearchWorkers
+				r.PolishCandidates = search.PolishCandidates
+				r.Termination = "retained faster verified current line"
+			}
 			err = nil
 		}
 		send(solved{result: r, config: config, err: err})
@@ -180,6 +206,10 @@ func (g *game) acceptReplies() error {
 		select {
 		case reply := <-g.replies:
 			if reply.generation != g.generation {
+				continue
+			}
+			if reply.freshSearch != "" {
+				g.setStatus(reply.freshSearch)
 				continue
 			}
 			if reply.analysis {
@@ -194,22 +224,27 @@ func (g *game) acceptReplies() error {
 			if reply.err != nil {
 				g.busy = false
 				g.provisional = false
-				if g.rollback != nil {
-					g.rollback()
+				checkpoint := g.checkpoint
+				if checkpoint != nil {
+					checkpoint.rollback()
+					g.result, g.config, g.solvedScene = checkpoint.result, checkpoint.config, checkpoint.scene
+					g.checkpoint = checkpoint.previous
 				}
-				g.result, g.config, g.solvedScene = g.oldResult, g.oldConfig, g.oldScene
 				g.manualMode = g.manualMode && activeManual(g.ed.Scene())
 				if err := g.rebuild(); err != nil {
 					return err
 				}
 				g.markManualFailure(reply.err)
 				g.recordError(fmt.Errorf("edit reverted: %w", reply.err))
-				g.rollback = nil
+				if g.checkpoint != nil {
+					g.startSolve(nil, true)
+					g.setStatus("Latest edit reverted; finishing the preceding edit…")
+				}
 				continue
 			}
 			fraction := g.clock / g.playbackDuration()
 			g.result, g.config = reply.result, reply.config
-			g.solvedScene = g.ed.Scene()
+			g.solvedScene = reply.scene
 			g.provisional = reply.provisional
 			g.busy = reply.provisional
 			g.clock = fraction * g.playbackDuration()
@@ -224,7 +259,7 @@ func (g *game) acceptReplies() error {
 				return nil
 			} else {
 				g.setStatus(fmt.Sprintf("Solved · %.2f s · %+.2f s versus centreline", g.result.Duration, g.result.Duration-g.result.CenterDuration))
-				g.rollback = nil
+				g.checkpoint = nil
 				g.resetCamera = false
 				if g.setupOpen {
 					g.analyze()

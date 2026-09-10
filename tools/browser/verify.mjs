@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 import { presentationChecks } from "./presentation.mjs";
 import { closedChecks } from "./closed.mjs";
+import { onceChecks } from "./once.mjs";
 import { roadmapChecks } from "./roadmap.mjs";
 import { authoringChecks } from "./authoring.mjs";
 import { manualChecks } from "./manual.mjs";
@@ -21,7 +22,7 @@ const artifactOption = process.argv.find(a => a.startsWith("--artifacts="))?.sli
 const artifacts = path.resolve(root, artifactOption || "artifacts/browser");
 const selected = process.argv.find((a) => a.startsWith("--case="))?.slice(7);
 const scope = process.argv.find((a) => a.startsWith("--scope="))?.slice(8) || "all";
-assert.ok(["interaction", "analysis", "setup", "instrumentation", "manual", "authoring", "presentation", "closed", "roadmap", "all"].includes(scope), `Unknown scope: ${scope}`);
+assert.ok(["once", "interaction", "analysis", "setup", "instrumentation", "manual", "authoring", "presentation", "closed", "roadmap", "all"].includes(scope), `Unknown scope: ${scope}`);
 const cases = [
   { name: "elevated-retina", view: "3d", width: 1000, height: 700, dpr: 2 },
   { name: "plan", view: "2d", width: 1440, height: 900, dpr: 1 },
@@ -910,6 +911,14 @@ try {
           await run();
           checks.push(name);
         }, { state, wait, control, tick, near, coords, click, key, seekTimeline, artifacts, startPreset });
+      }
+      if (scope === "once" || scope === "roadmap" || scope === "all") {
+        await onceChecks(page, c, async (name, run) => {
+          currentCheck = name;
+          console.log(`${c.name}: ${name}`);
+          await run();
+          checks.push(name);
+        }, { state, wait, control, tick, near, coords, artifacts, startPreset });
       }
       if (scope === "instrumentation" || scope === "roadmap" || scope === "all") {
         await startPreset(page, c);

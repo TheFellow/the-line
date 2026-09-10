@@ -70,6 +70,7 @@ export async function roadmapChecks(page, c, check, h) {
     const changed = await wait(page, s => !s.busy && !s.provisional, "axle setup settles");
     near(changed.config.front_brake, .5, "first fixed brake bias is balanced");
     near(changed.config.lift_area, .25, "downforce step");
+    near(changed.config.aero_balance, changed.config.front_weight, "first downforce matches static balance");
     assert.ok(changed.forceResidual < .0005);
     await page.screenshot({path:path.join(artifacts, `${c.name}-axle-setup.png`)});
     await control(page, "load-car");

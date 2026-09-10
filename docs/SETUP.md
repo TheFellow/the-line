@@ -4,7 +4,9 @@ Click **Setup** above the vehicle name to switch the sidebar to nine SI-backed
 steppers: mass, power, braking capacity, top speed, tyre grip, drag area, front
 weight fraction, fixed front drive fraction, and vehicle width. The displayed
 power is kW and speed is km/h; JSON and CLI parameters remain SI. Front weight
-and drive fractions affect **static traction only** in this model.
+and drive fractions set the static load and fixed torque split. The second page
+adds brake bias, downforce balance, longitudinal load transfer and load sensitivity;
+see [vehicle assumptions](VEHICLE_MODEL.md).
 
 Each accepted setup change shares the geometry undo/redo history. Validation
 reports the field that failed and leaves the previous setup and histories intact.
@@ -22,8 +24,14 @@ A setup edit first evaluates the existing path under the new model asynchronousl
 The amber **Provisional** message identifies this verified fixed-path result;
 then a seeded heuristic search can replace it with a faster verified path. A
 slower search result keeps the provisional path. New edits cancel pending work,
-and generation IDs reject stale replies. Invalid provisional edits restore the
-previous accepted setup, both trajectories, and undo/redo stacks.
+and generation IDs reject stale replies. If the old line no longer fits a wider
+car, a fresh search starts without it. Only a rejected warm-start seed triggers
+an unseeded retry; unrelated failures are not repeated.
+
+Each committed edit owns its rollback checkpoint. If a second edit fails while
+superseding an unfinished first edit, only the second edit is discarded and the
+first solve resumes. Its setup and history survive; accepted replies carry the
+scene that was actually solved. A rejected edit cannot reappear through redo.
 
 Click **Analyze** for one-sided finite differences on this same line: +50 kg,
 +25 kW, +0.05 tyre grip, and +0.1 m² drag area. These are fixed-path effects, not
