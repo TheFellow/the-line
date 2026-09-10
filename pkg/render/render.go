@@ -27,6 +27,7 @@ type Options struct {
 	View string
 	// Camera preserves an explicit framing; nil fits the road automatically.
 	Camera *Camera
+	SetupPage int
 	Setup  bool
 }
 
