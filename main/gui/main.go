@@ -807,6 +807,9 @@ func (g *game) Draw(screen *ebiten.Image) {
 		status = fmt.Sprintf("Drag handle %02d to reshape the road; release to compute the line", g.hover+1)
 	}
 	path := g.opts.file
+	if g.race != nil {
+		path = g.racePath()
+	}
 	if g.fileEditing {
 		path = g.fileDraft + "|"
 		status = "Editing save / load path · ENTER confirm · ESC cancel"

@@ -71,22 +71,32 @@ func (r *Renderer) raceCharts(im *image.RGBA) {
 		line(im, point{82, y}, point{1078, y}, 1, faint)
 	}
 	line(im, point{82, 735}, point{1078, 735}, 1, muted)
-	r.text(im, 44, 610, "200", 11, muted, false)
-	r.text(im, 44, 640, "100", 11, muted, false)
+	speedMax, gapMax := 200., 20.
+	for _, car := range r.opts.Race.Cars {
+		for _, n := range car.Path.Nodes {
+			speedMax = math.Max(speedMax, math.Ceil(n.Speed*3.6/50)*50)
+		}
+	}
+	for i := 0; i <= 400; i++ {
+		n := r.opts.Race.At(r.opts.Race.Duration * float64(i) / 400)
+		gapMax = math.Max(gapMax, math.Ceil(math.Abs(n[0].Station-n[1].Station)/10)*10)
+	}
+	r.text(im, 44, 610, fmt.Sprintf("%.0f", speedMax), 11, muted, false)
+	r.text(im, 44, 640, fmt.Sprintf("%.0f", speedMax/2), 11, muted, false)
 	r.text(im, 57, 670, "0", 11, muted, false)
-	r.text(im, 44, 718, "+20", 11, muted, false)
+	r.text(im, 44, 718, fmt.Sprintf("+%.0f", gapMax), 11, muted, false)
 	r.text(im, 57, 738, "0", 11, muted, false)
-	r.text(im, 44, 758, "-20", 11, muted, false)
+	r.text(im, 44, 758, fmt.Sprintf("-%.0f", gapMax), 11, muted, false)
 	race := r.opts.Race
 	for i := 1; i <= 400; i++ {
 		ta, tb := race.Duration*float64(i-1)/400, race.Duration*float64(i)/400
 		a, b := race.At(ta), race.At(tb)
 		x1, x2 := 82+996*ta/race.Duration, 82+996*tb/race.Duration
 		for car := 0; car < 2; car++ {
-			line(im, point{x1, 667 - a[car].Speed*1.08}, point{x2, 667 - b[car].Speed*1.08}, 1.7, raceColors[car])
+			line(im, point{x1, 667 - a[car].Speed*3.6/speedMax*60}, point{x2, 667 - b[car].Speed*3.6/speedMax*60}, 1.7, raceColors[car])
 		}
 		gapA, gapB := a[0].Station-a[1].Station, b[0].Station-b[1].Station
-		line(im, point{x1, 735 - math.Max(-20, math.Min(20, gapA))}, point{x2, 735 - math.Max(-20, math.Min(20, gapB))}, 1.8, ink)
+		line(im, point{x1, 735 - gapA/gapMax*20}, point{x2, 735 - gapB/gapMax*20}, 1.8, ink)
 	}
 	for _, e := range race.Events {
 		x := 82 + 996*e.Time/race.Duration
@@ -151,7 +161,11 @@ func (r *Renderer) raceFrame(t float64, state State) image.Image {
 	r.text(im, 1150, 875, fmt.Sprintf("PLAYBACK  %.2gx", state.Rate), 12, ink, false)
 	status := state.Status
 	if status == "" {
-		status = "SPACE play / pause    TAB view    , / . step    R qualifying    Save/load: racecraft.json"
+		path := state.FilePath
+		if path == "" {
+			path = "racecraft.json"
+		}
+		status = "SPACE play / pause    TAB view    , / . step    R qualifying    Save/load: " + path
 	}
 	r.text(im, 40, 893, truncate(status, 135), 12, muted, false)
 	return r.scaledFrame(im)
