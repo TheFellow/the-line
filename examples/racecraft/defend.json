@@ -1,0 +1,103 @@
+{
+  "racecraft": {
+    "version": 1,
+    "scenario": "defend",
+    "gap_m": 14,
+    "overspeed_mps": 0,
+    "separation_m": 6,
+    "clearance_m": 0.2
+  },
+  "scene": {
+    "version": 2,
+    "name": "The Switchback",
+    "vehicle": "road",
+    "entry_speed_cap": 38,
+    "exit_speed_cap": 55,
+    "points": [
+      {
+        "x": -120,
+        "y": 0,
+        "z": 0,
+        "width": 12,
+        "bank": 0,
+        "surface": "asphalt"
+      },
+      {
+        "x": -55,
+        "y": 0,
+        "z": 0,
+        "width": 12,
+        "bank": 0,
+        "surface": "asphalt"
+      },
+      {
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "width": 12,
+        "bank": 0,
+        "surface": "asphalt"
+      },
+      {
+        "x": 28,
+        "y": 14,
+        "z": 0,
+        "width": 12,
+        "bank": 0,
+        "surface": "asphalt"
+      },
+      {
+        "x": 38,
+        "y": 40,
+        "z": 0,
+        "width": 12,
+        "bank": 0,
+        "surface": "asphalt"
+      },
+      {
+        "x": 28,
+        "y": 66,
+        "z": 0,
+        "width": 12,
+        "bank": 0,
+        "surface": "asphalt"
+      },
+      {
+        "x": 0,
+        "y": 80,
+        "z": 0,
+        "width": 12,
+        "bank": 0,
+        "surface": "asphalt"
+      },
+      {
+        "x": -55,
+        "y": 80,
+        "z": 0,
+        "width": 12,
+        "bank": 0,
+        "surface": "asphalt"
+      },
+      {
+        "x": -120,
+        "y": 80,
+        "z": 0,
+        "width": 12,
+        "bank": 0,
+        "surface": "asphalt"
+      }
+    ]
+  },
+  "vehicle": {
+    "name": "Club Sport · RWD",
+    "mass": 1250,
+    "power": 155000,
+    "brake": 10,
+    "max_speed": 65,
+    "grip": 1.05,
+    "drag_area": 0.66,
+    "front_weight": 0.52,
+    "front_drive": 0,
+    "width": 1.8
+  }
+}

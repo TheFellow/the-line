@@ -13,6 +13,9 @@ var referenceColor = color.RGBA{115, 193, 225, 255}
 
 // PlaybackDuration includes the slower reference finish when its ghost is shown.
 func (r *Renderer) PlaybackDuration(comparison bool) float64 {
+	if r.opts.Race != nil {
+		return r.opts.Race.Duration
+	}
 	if r.result.Closed {
 		return r.result.Duration
 	}

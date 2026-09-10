@@ -10,6 +10,7 @@ import (
 	"math"
 	"sort"
 
+	"github.com/TheFellow/the-line/pkg/racecraft"
 	"github.com/TheFellow/the-line/pkg/solver"
 	"github.com/TheFellow/the-line/pkg/track"
 	"github.com/TheFellow/the-line/pkg/vehicle"
@@ -22,6 +23,7 @@ import (
 )
 
 type Options struct {
+	Race          *racecraft.Result
 	Analysis      bool
 	Authoring     bool
 	Width, Height int
@@ -119,6 +121,9 @@ func New(scene track.Scene, result solver.Result, config vehicle.Config, opts Op
 	if opts.View != "2d" && opts.View != "3d" && opts.View != "perspective" {
 		return nil, fmt.Errorf("view must be 2d, 3d or perspective")
 	}
+	if opts.Race != nil && (opts.View == "perspective" || opts.Race.Duration <= 0) {
+		return nil, fmt.Errorf("racecraft requires a valid experiment and a 2d or 3d view")
+	}
 	if len(result.Road) < 2 || len(result.Nodes) < 2 {
 		return nil, fmt.Errorf("render requires a solved road")
 	}
@@ -190,6 +195,9 @@ func (r *Renderer) Frame(t float64) image.Image {
 
 // FrameWithState overlays the vehicle, selection, playhead and live telemetry.
 func (r *Renderer) FrameWithState(t float64, state State) image.Image {
+	if r.opts.Race != nil {
+		return r.raceFrame(t, state)
+	}
 	copy(r.frame.Pix, r.base.Pix)
 	im := r.frame
 	t = r.frameTime(t, state)
@@ -272,6 +280,10 @@ func (r *Renderer) FrameWithState(t float64, state State) image.Image {
 		}
 		r.text(im, 40, r.opts.Height-6, hint, 12, muted, false)
 	}
+	return r.scaledFrame(im)
+}
+
+func (r *Renderer) scaledFrame(im *image.RGBA) image.Image {
 	if r.output.Bounds() == im.Bounds() {
 		return im
 	}
@@ -281,6 +293,10 @@ func (r *Renderer) FrameWithState(t float64, state State) image.Image {
 }
 
 func (r *Renderer) drawBase() {
+	if r.opts.Race != nil {
+		r.raceBase()
+		return
+	}
 	im := r.base
 	fill(im, im.Bounds(), bg)
 	w, h := r.opts.Width, r.opts.Height
@@ -325,6 +341,7 @@ func (r *Renderer) drawBase() {
 	r.button(im, "comparison", image.Rect(736, h-87, 897, h-53), "", false)
 	r.button(im, "rate", image.Rect(908, h-87, 1039, h-53), "", false)
 	r.presentationBase(im)
+	r.button(im, "race-mode", image.Rect(870, 25, 1085, 63), "RACECRAFT MODE", false)
 }
 
 func (r *Renderer) drawRoad(im *image.RGBA) {
@@ -404,15 +421,17 @@ func (r *Renderer) drawRoad(im *image.RGBA) {
 			line(im, r.projected(a.Position), r.projected(b.Position), 1, color.RGBA{196, 203, 196, 115})
 		}
 	}
-	for i := 1; i < len(r.result.Nodes); i++ {
+	for i := 1; r.opts.Race == nil && i < len(r.result.Nodes); i++ {
 		a, b := r.result.Nodes[i-1], r.result.Nodes[i]
 		line(im, r.projected(a.Position), r.projected(b.Position), 8, color.RGBA{52, 235, 182, 27})
 	}
-	for i := 1; i < len(r.result.Nodes); i++ {
+	for i := 1; r.opts.Race == nil && i < len(r.result.Nodes); i++ {
 		a, b := r.result.Nodes[i-1], r.result.Nodes[i]
 		line(im, r.projected(a.Position), r.projected(b.Position), 2.8, r.opts.LineColor.color(b))
 	}
-	r.roadMarkers(im)
+	if r.opts.Race == nil {
+		r.roadMarkers(im)
+	}
 	for _, idx := range []int{0, len(road) - 1} {
 		s := road[idx]
 		for j := 0; j < 10; j++ {
@@ -425,7 +444,7 @@ func (r *Renderer) drawRoad(im *image.RGBA) {
 			line(im, r.projected(s.AtOffset(a)), r.projected(s.AtOffset(b)), 4, col)
 		}
 	}
-	if !r.opts.Manual {
+	if !r.opts.Manual && r.opts.Race == nil {
 		for i, p := range r.scene.Points {
 			q := r.projected(track.Vec3{X: p.X, Y: p.Y, Z: p.Z})
 			circle(im, q, 7, bg)

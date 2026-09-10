@@ -30,6 +30,7 @@ Usage: the-line <command> [flags]
   import     Import a CSV centreline with asymmetric road widths
   validate   Validate a track and its vehicle
   solve      Optimize a sequence; export JSON or CSV telemetry
+  race       Plan two solid cars; export JSON, CSV, PNG or GIF
   sweep      Sweep a setup parameter on one fixed optimized line
   render     Render the studio to a PNG without a display
   animate    Render a timed animated GIF without a display
@@ -64,6 +65,9 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	command := args[0]
+	if command == "race" {
+		return runRace(args[1:], stdout, stderr)
+	}
 	if command == "import" {
 		return runImport(args[1:], stdout, stderr)
 	}
