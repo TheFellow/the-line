@@ -22,7 +22,7 @@ go run ./main/cli presets
 
 ## Live editor
 
-Drag a control point and release to recompute the line. Use the sidebar to change width, bank, elevation and surface, add or delete controls, switch vehicles and cycle the built-in sequences. Playback continues while a background solve runs. A rejected edit restores the last valid scene.
+Hold the left mouse button on a numbered circular handle, drag it, and release to recompute the line. Handles highlight under the pointer; amber road edges preview the change while dragging. Press Escape to cancel a drag. The road surface itself is not a drag target. Use the sidebar to change width, bank, elevation and surface, add or delete controls, switch vehicles and cycle the built-in sequences. Playback continues while a background solve runs. A rejected edit restores the last valid scene.
 
 | Control | Action |
 | --- | --- |
@@ -36,7 +36,7 @@ Drag a control point and release to recompute the line. Use the sidebar to chang
 | Cmd/Ctrl+N | Start a new sequence |
 | Cmd/Ctrl+S / Cmd/Ctrl+O | Save / load the displayed file path |
 | Cmd/Ctrl+Z / Cmd/Ctrl+Shift+Z | Undo / redo |
-| Escape | Close the studio |
+| Escape | Cancel an active drag, otherwise close the studio |
 
 Click the file path to edit it, use Cmd/Ctrl+A to clear it, and Enter to confirm. Vehicle JSON examples and editable corner fixtures are in [examples](examples/). Custom vehicle files can be used with CLI solving/rendering; the live vehicle button cycles the built-in presets.
 

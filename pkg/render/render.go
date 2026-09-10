@@ -34,6 +34,14 @@ type State struct {
 	Status   string
 	FPS      float64
 	FilePath string
+	Hover    *int
+	Drag     *DragPreview
+}
+
+// DragPreview is an uncommitted control position shown over the last solved road.
+type DragPreview struct {
+	Index    int
+	Position track.Vec3
 }
 
 type point struct{ x, y float64 }
@@ -206,6 +214,15 @@ func (r *Renderer) FrameWithState(t float64, state State) image.Image {
 		r.selection(im, selected, p)
 	}
 	r.car(im, t, n)
+	if state.Hover != nil && *state.Hover >= 0 && *state.Hover < len(r.scene.Points) {
+		q := r.projected(r.scene.Points[*state.Hover].Position())
+		circle(im, q, 12, accent)
+		circle(im, q, 9, bg)
+		circle(im, q, 4, ink)
+	}
+	if state.Drag != nil {
+		r.drawDrag(im, *state.Drag)
+	}
 	path := state.FilePath
 	if path == "" {
 		path = "scene.json"
@@ -242,7 +259,7 @@ func (r *Renderer) FrameWithState(t float64, state State) image.Image {
 	if state.Status != "" {
 		r.text(im, 40, r.opts.Height-24, truncate(state.Status, 92), 12, color.RGBA{237, 189, 127, 255}, false)
 	} else {
-		r.text(im, 40, r.opts.Height-24, "SPACE  play / pause     TAB  change view     Drag a control point to reshape the road", 12, muted, false)
+		r.text(im, 40, r.opts.Height-24, "SPACE  play / pause     TAB  change view     Drag a numbered handle; release to apply", 12, muted, false)
 	}
 	if r.output.Bounds() == im.Bounds() {
 		return im
@@ -402,13 +419,52 @@ func (r *Renderer) drawRoad(im *image.RGBA) {
 	}
 	for i, p := range r.scene.Points {
 		q := r.projected(track.Vec3{X: p.X, Y: p.Y, Z: p.Z})
-		circle(im, q, 4, bg)
-		circle(im, q, 2, muted)
-		r.text(im, int(q.x)+10, int(q.y)-9, fmt.Sprintf("%02d", i+1), 11, muted, false)
+		circle(im, q, 7, bg)
+		circle(im, q, 5, ink)
+		circle(im, q, 3, panel)
+		r.text(im, int(q.x)+11, int(q.y)-10, fmt.Sprintf("%02d", i+1), 12, ink, true)
 	}
 	start, end := r.projected(road[0].Position), r.projected(road[len(road)-1].Position)
 	r.text(im, int(start.x)+13, int(start.y)+25, "IN", 11, accent, true)
 	r.text(im, int(end.x)+13, int(end.y)+25, "OUT", 11, accent, true)
+}
+
+func (r *Renderer) drawDrag(im *image.RGBA, preview DragPreview) {
+	if preview.Index < 0 || preview.Index >= len(r.scene.Points) {
+		return
+	}
+	scene := r.scene
+	scene.Points = append([]track.Point(nil), scene.Points...)
+	p := &scene.Points[preview.Index]
+	p.X, p.Y, p.Z = preview.Position.X, preview.Position.Y, preview.Position.Z
+	col := color.RGBA{255, 196, 104, 255}
+	road, err := track.SampleRoad(scene, 4)
+	if err != nil {
+		col = color.RGBA{255, 125, 115, 255}
+	} else {
+		for i := 1; i < len(road); i++ {
+			for _, side := range []float64{-1, 1} {
+				a, b := road[i-1], road[i]
+				line(im, r.projected(a.AtOffset(side*a.Width/2)), r.projected(b.AtOffset(side*b.Width/2)), 2, col)
+			}
+		}
+	}
+	q := r.projected(preview.Position)
+	origin := r.projected(r.scene.Points[preview.Index].Position())
+	line(im, origin, q, 2, col)
+	for _, i := range []int{preview.Index - 1, preview.Index + 1} {
+		if i >= 0 && i < len(scene.Points) {
+			line(im, q, r.projected(scene.Points[i].Position()), 1, col)
+		}
+	}
+	circle(im, q, 11, col)
+	circle(im, q, 8, bg)
+	circle(im, q, 4, col)
+	label := fmt.Sprintf("MOVE %02d · release to apply", preview.Index+1)
+	if err != nil {
+		label = "Invalid shape · Esc to cancel"
+	}
+	r.text(im, int(q.x)+16, int(q.y)-17, label, 13, col, true)
 }
 
 func (r *Renderer) sidebar(im *image.RGBA) {

@@ -45,3 +45,11 @@ Run `make verify` to regenerate exports and execute tests. Run `make verify-gui`
 ## Model boundaries
 
 These are open, non-self-intersecting road sequences. Entry/exit speeds are caps; lateral endpoint positions/headings are free. Clearance protects a horizontal circular margin, not the swept body of a steering car. The road uses a triangle mesh with sampled curvature. The vehicle model has static axle loads, fixed drive torque split, constant surface friction and a decoupled bank/grade approximation. Steering dynamics, load transfer, calibrated tyre slip, drifting, suspension, crest unloading, jumps and periodic full-lap optimization are not implemented. Those require richer models and additional validation.
+
+## Pointer interaction follow-up
+
+Control handles now highlight on hover, use a larger grab area, preserve an off-centre grab offset, and show amber road edges while dragging. Escape cancels a drag. The preview is uncommitted; release applies one undoable edit and starts the solver. Invalid drops retain the prior scene and display their error.
+
+`TestPointerDragWithActualProjection` exercises both views at 1440×900 and 800×600, including off-centre grabs, click versus drag, fixed elevation, undo and invalid drops. Renderer checks cover preview visibility and cache isolation. `go test ./...` and `go vet ./...` passed. Both view previews and the actual native drag capture were inspected.
+
+Native focused verification passed in both views using `--demo-drag --frames 240 --report ... --capture ...`: the third banked control moved from (−35, −55, 3.2) to (−33, −54, 3.2) through the same pointer handler used by mouse input. Reports are `artifacts/drag-focused.json` and `artifacts/drag-focused-2d.json`. The full demo now includes pointer drag and undo (23 actions); automated runs start unfocused and ignore unrelated keyboard input.

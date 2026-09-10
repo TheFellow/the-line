@@ -78,3 +78,28 @@ func TestFrameAnimationAndViews(t *testing.T) {
 		}
 	}
 }
+
+func TestDragPreviewDoesNotReplaceSolvedScene(t *testing.T) {
+	for _, view := range []string{"2d", "3d"} {
+		r := fixture(t, view)
+		before := append([]byte(nil), r.Frame(0).(*image.RGBA).Pix...)
+		p := r.scene.Points[3].Position().Add(track.Vec3{X: 8, Y: 6})
+		frame := r.FrameWithState(0, State{Selected: 3, Drag: &DragPreview{Index: 3, Position: p}}).(*image.RGBA)
+		x, y := r.Project(p)
+		changed := false
+		for yy := int(y) - 5; yy <= int(y)+5; yy++ {
+			for xx := int(x) - 5; xx <= int(x)+5; xx++ {
+				offset := frame.PixOffset(xx, yy)
+				if !bytes.Equal(before[offset:offset+4], frame.Pix[offset:offset+4]) {
+					changed = true
+				}
+			}
+		}
+		if !changed {
+			t.Fatalf("%s: no visible handle at drag destination", view)
+		}
+		if !bytes.Equal(before, r.Frame(0).(*image.RGBA).Pix) {
+			t.Fatalf("%s: preview modified the solved scene", view)
+		}
+	}
+}

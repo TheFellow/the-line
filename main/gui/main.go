@@ -29,6 +29,7 @@ type options struct {
 	preset, scene, vehicle, view, file, capture, report string
 	frames, width, height                               int
 	demo                                                bool
+	demoDrag                                            bool
 }
 
 type solved struct {
@@ -38,33 +39,34 @@ type solved struct {
 }
 
 type game struct {
-	opts         options
-	ed           *editor.Editor
-	solvedScene  track.Scene
-	renderer     *render.Renderer
-	result       solver.Result
-	config       vehicle.Config
-	texture      *ebiten.Image
-	replies      chan solved
-	busy         bool
-	rollback     func() bool
-	playing      bool
-	clock        float64
-	status       string
-	statusUntil  time.Time
-	frame, draws int
-	captured     bool
-	captureErr   error
-	started      time.Time
-	dragging     bool
-	dragIndex    int
-	dragX, dragY int
-	dragPosition track.Vec3
-	fileEditing  bool
-	fileDraft    string
-	demoIndex    int
-	demoLog      []string
-	nextDemo     int
+	opts                 options
+	ed                   *editor.Editor
+	solvedScene          track.Scene
+	renderer             *render.Renderer
+	result               solver.Result
+	config               vehicle.Config
+	texture              *ebiten.Image
+	replies              chan solved
+	busy                 bool
+	rollback             func() bool
+	playing              bool
+	clock                float64
+	status               string
+	statusUntil          time.Time
+	frame, draws         int
+	captured             bool
+	captureErr           error
+	started              time.Time
+	drag                 *editor.Drag
+	pointerX, pointerY   float64
+	hover                int
+	fileEditing          bool
+	fileDraft            string
+	demoIndex            int
+	demoLog              []string
+	nextDemo             int
+	demoDragStep         int
+	demoDragX, demoDragY float64
 }
 
 func main() {
@@ -80,7 +82,12 @@ func main() {
 	flag.IntVar(&o.width, "width", 1440, "logical window width")
 	flag.IntVar(&o.height, "height", 900, "logical window height")
 	flag.BoolVar(&o.demo, "demo", false, "exercise select/edit/undo/redo/save/load/view actions before capture")
+	flag.BoolVar(&o.demoDrag, "demo-drag", false, "verify pointer dragging only (use with --frames and --report)")
 	flag.Parse()
+	if o.demoDrag {
+		o.demo = true
+		demoActions = []string{"next", "next", "pointer-drag"}
+	}
 	if o.frames < 0 {
 		log.Fatal("frames must be nonnegative")
 	}
@@ -117,11 +124,14 @@ func main() {
 	g.texture = ebiten.NewImage(o.width, o.height)
 	ebiten.SetWindowSize(o.width, o.height)
 	ebiten.SetWindowTitle("The Line · Racing geometry studio")
+	if o.demo {
+		ebiten.SetWindowTitle("The Line verification · closes automatically")
+	}
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
 	ebiten.SetTPS(60)
 	// Finite runs also progress when the automation window loses focus.
 	ebiten.SetRunnableOnUnfocused(true)
-	runErr := ebiten.RunGame(g)
+	runErr := ebiten.RunGameWithOptions(g, &ebiten.RunGameOptions{InitUnfocused: o.demo})
 	if errors.Is(runErr, ebiten.Termination) {
 		runErr = nil
 	}
@@ -217,11 +227,22 @@ func (g *game) Update() error {
 			g.clock = math.Mod(g.clock, g.result.Duration)
 		}
 	}
+	if g.opts.demo {
+		if !g.busy && g.frame >= g.nextDemo {
+			g.runDemo()
+		}
+		return nil
+	}
 	if g.fileEditing {
 		g.editPath()
 		return nil
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		if g.drag != nil {
+			g.drag = nil
+			g.setStatus("Drag cancelled")
+			return nil
+		}
 		return ebiten.Termination
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
@@ -277,58 +298,64 @@ func (g *game) Update() error {
 		}
 	}
 	g.mouse()
-	if g.opts.demo && !g.busy && g.frame >= g.nextDemo {
-		g.runDemo()
-	}
 	return nil
 }
 
 func (g *game) mouse() {
 	x, y := ebiten.CursorPosition()
-	if inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft) {
-		for key, rect := range g.renderer.Controls() {
-			if image.Pt(x, y).In(rect) {
+	g.pointer(float64(x), float64(y), inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft), ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft), inpututil.IsMouseButtonJustReleased(ebiten.MouseButtonLeft))
+	shape := ebiten.CursorShapeDefault
+	if g.hover >= 0 {
+		shape = ebiten.CursorShapePointer
+	}
+	if g.drag != nil {
+		shape = ebiten.CursorShapeMove
+	}
+	ebiten.SetCursorShape(shape)
+}
+
+// pointer is shared by real mouse events and the automated drag scenario.
+func (g *game) pointer(x, y float64, pressed, held, released bool) {
+	g.pointerX, g.pointerY = x, y
+	g.hover = -1
+	for key, rect := range g.renderer.Controls() {
+		if image.Pt(int(x), int(y)).In(rect) && g.drag == nil {
+			if pressed {
 				if key == "scrub" {
-					g.scrub(x)
+					g.scrub(int(x))
 				} else {
 					g.action(key)
 				}
-				return
 			}
-		}
-		if !g.busy {
-			s := g.ed.Scene()
-			best, distance := -1, 18.0
-			for i, p := range s.Points {
-				px, py := g.renderer.Project(p.Position())
-				d := math.Hypot(px-float64(x), py-float64(y))
-				if d < distance {
-					best, distance = i, d
-				}
+			if held && key == "scrub" {
+				g.scrub(int(x))
 			}
-			if best >= 0 {
-				_ = g.ed.Select(best)
-				g.dragging = true
-				g.dragIndex = best
-				g.dragX, g.dragY = x, y
-				g.dragPosition = s.Points[best].Position()
-			}
+			return
 		}
 	}
-	if ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft) && !g.dragging {
-		if rect := g.renderer.Controls()["scrub"]; image.Pt(x, y).In(rect) {
-			g.scrub(x)
+	if !g.busy {
+		g.hover = editor.Pick(g.ed.Scene(), g.renderer, x, y)
+	}
+	if pressed {
+		if g.busy {
+			g.setStatus("Computing the last edit — drag again when the line is ready")
+			return
+		}
+		g.drag = editor.BeginDrag(g.ed.Scene(), g.renderer, x, y)
+		if g.drag != nil {
+			_ = g.ed.Select(g.drag.Index)
+		} else {
+			g.setStatus("Grab a numbered circular handle; release to apply the edit")
 		}
 	}
-	if g.dragging && inpututil.IsMouseButtonJustReleased(ebiten.MouseButtonLeft) {
-		g.dragging = false
-		if math.Hypot(float64(x-g.dragX), float64(y-g.dragY)) > 2 {
-			p := g.renderer.Unproject(float64(x), float64(y), g.dragPosition.Z)
-			if err := g.ed.MovePoint(g.dragIndex, p); err != nil {
-				g.recordError(err)
-			} else {
-				g.queueSolve(g.ed.Undo)
-			}
+	if g.drag != nil && released {
+		drag := g.drag
+		g.drag = nil
+		changed, err := drag.Commit(g.ed, g.renderer, x, y)
+		if err != nil {
+			g.recordError(err)
+		} else if changed {
+			g.queueSolve(g.ed.Undo)
 		}
 	}
 }
@@ -355,6 +382,7 @@ func (g *game) action(key string) {
 		g.clock = 0
 		return
 	case "view":
+		g.drag = nil
 		if g.opts.view == "3d" {
 			g.opts.view = "2d"
 		} else {
@@ -373,6 +401,10 @@ func (g *game) action(key string) {
 	case "path":
 		g.fileEditing = true
 		g.fileDraft = g.opts.file
+		return
+	}
+	if g.drag != nil {
+		g.setStatus("Release the handle to apply the edit, or press Esc to cancel")
 		return
 	}
 	if g.busy {
@@ -528,14 +560,40 @@ func (g *game) editPath() {
 	}
 }
 
-var demoActions = []string{"next", "next", "width+", "bank-", "height+", "move-up", "add", "undo", "redo", "delete", "surface+", "surface-", "save", "new", "vehicle", "preset", "load", "view", "view", "scrub-mid", "play"}
+var demoActions = []string{"next", "next", "pointer-drag", "undo", "width+", "bank-", "height+", "move-up", "add", "undo", "redo", "delete", "surface+", "surface-", "save", "new", "vehicle", "preset", "load", "view", "view", "scrub-mid", "play"}
 
 func (g *game) runDemo() {
 	if g.demoIndex >= len(demoActions) {
 		return
 	}
 	a := demoActions[g.demoIndex]
-	g.action(a)
+	if a == "pointer-drag" {
+		switch g.demoDragStep {
+		case 0:
+			p := g.ed.Scene().Points[g.ed.Selected()].Position()
+			x, y := g.renderer.Project(p)
+			endX, endY := g.renderer.Project(p.Add(track.Vec3{X: 2, Y: 1}))
+			g.pointer(x+6, y-4, true, true, false)
+			if g.drag == nil {
+				g.recordError(fmt.Errorf("pointer did not pick selected control"))
+			} else {
+				g.demoDragX, g.demoDragY = endX+6, endY-4
+				g.demoDragStep = 1
+				g.nextDemo = g.frame + 5
+				return
+			}
+		case 1:
+			g.pointer(g.demoDragX, g.demoDragY, false, true, false)
+			g.demoDragStep = 2
+			g.nextDemo = g.frame + 5
+			return
+		case 2:
+			g.pointer(g.demoDragX, g.demoDragY, false, false, true)
+			g.demoDragStep = 0
+		}
+	} else {
+		g.action(a)
+	}
 	g.demoLog = append(g.demoLog, a)
 	g.demoIndex++
 	g.nextDemo = g.frame + 5
@@ -546,26 +604,26 @@ func (g *game) Draw(screen *ebiten.Image) {
 	if time.Now().After(g.statusUntil) && !g.busy {
 		status = ""
 	}
-	if g.dragging {
-		status = "Release to move this control point and recompute the line"
+	if g.drag != nil {
+		status = "Drag preview · release to apply · Esc to cancel"
+	} else if g.hover >= 0 && !g.busy && status == "" {
+		status = fmt.Sprintf("Drag handle %02d to reshape the road; release to compute the line", g.hover+1)
 	}
 	path := g.opts.file
 	if g.fileEditing {
 		path = g.fileDraft + "|"
 		status = "Editing save / load path · ENTER confirm · ESC cancel"
 	}
-	frame := g.renderer.FrameWithState(g.clock, render.State{Selected: g.ed.Selected(), Playing: g.playing, Status: status, FPS: ebiten.ActualFPS(), FilePath: path})
+	state := render.State{Selected: g.ed.Selected(), Playing: g.playing, Status: status, FPS: ebiten.ActualFPS(), FilePath: path}
+	if g.hover >= 0 && !g.busy {
+		state.Hover = &g.hover
+	}
+	if g.drag != nil {
+		state.Drag = &render.DragPreview{Index: g.drag.Index, Position: g.drag.Position(g.renderer, g.pointerX, g.pointerY)}
+	}
+	frame := g.renderer.FrameWithState(g.clock, state)
 	g.texture.WritePixels(frame.(*image.RGBA).Pix)
 	screen.DrawImage(g.texture, nil)
-	if g.dragging {
-		x, y := ebiten.CursorPosition() // A visible ghost makes the release destination unambiguous.
-		for dx := -9; dx <= 9; dx++ {
-			screen.Set(x+dx, y, image.White.At(0, 0))
-		}
-		for dy := -9; dy <= 9; dy++ {
-			screen.Set(x, y+dy, image.White.At(0, 0))
-		}
-	}
 	g.draws++
 	done := g.opts.frames > 0 && g.draws >= g.opts.frames && !g.busy && (!g.opts.demo || g.demoIndex == len(demoActions))
 	if done && !g.captured {
