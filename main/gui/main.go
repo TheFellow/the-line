@@ -130,6 +130,11 @@ func main() {
 	if err := g.writeReport(); err != nil {
 		log.Fatal(err)
 	}
+	for _, action := range g.demoLog {
+		if strings.HasPrefix(action, "ERROR:") {
+			log.Fatal("demo verification failed: " + action)
+		}
+	}
 	fmt.Printf("Rendered %d frames, %d updates in %.2fs; Ebitengine %.1f FPS / %.1f TPS; run %.3fs\n", g.draws, g.frame, time.Since(g.started).Seconds(), ebiten.ActualFPS(), ebiten.ActualTPS(), g.result.Duration)
 }
 
@@ -324,6 +329,10 @@ func (g *game) action(key string) {
 	case "play":
 		g.playing = !g.playing
 		return
+	case "scrub-mid":
+		rect := g.renderer.Controls()["scrub"]
+		g.scrub((rect.Min.X + rect.Max.X) / 2)
+		return
 	case "restart":
 		g.clock = 0
 		return
@@ -504,7 +513,7 @@ func (g *game) editPath() {
 	}
 }
 
-var demoActions = []string{"next", "next", "width+", "bank-", "height+", "move-up", "add", "undo", "redo", "delete", "surface+", "surface-", "save", "load", "view", "view", "play", "play"}
+var demoActions = []string{"next", "next", "width+", "bank-", "height+", "move-up", "add", "undo", "redo", "delete", "surface+", "surface-", "save", "new", "vehicle", "preset", "load", "view", "view", "scrub-mid", "play"}
 
 func (g *game) runDemo() {
 	if g.demoIndex >= len(demoActions) {

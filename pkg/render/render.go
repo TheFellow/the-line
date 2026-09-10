@@ -54,6 +54,7 @@ type Renderer struct {
 	viewport                         image.Rectangle
 	scale, ox, oy                    float64
 	maxSpeed                         float64
+	minSpeed                         float64
 }
 
 var (
@@ -114,7 +115,9 @@ func New(scene track.Scene, result solver.Result, config vehicle.Config, opts Op
 	}
 	r.viewport = image.Rect(28, 104, opts.Width-356, opts.Height-130)
 	r.fit()
+	r.minSpeed = math.Inf(1)
 	for _, n := range result.Nodes {
+		r.minSpeed = math.Min(r.minSpeed, n.Speed)
 		r.maxSpeed = math.Max(r.maxSpeed, n.Speed)
 	}
 	r.drawBase()
@@ -280,8 +283,8 @@ func (r *Renderer) drawBase() {
 	for x := 0; x < 180; x++ {
 		fill(im, image.Rect(42+x, ky, 43+x, ky+5), speedColor(float64(x)/179))
 	}
-	r.text(im, 42, ky+23, "SLOW", 11, muted, false)
-	r.text(im, 186, ky+23, "FAST", 11, muted, false)
+	r.text(im, 42, ky+23, fmt.Sprintf("%.0f km/h", r.minSpeed*3.6), 11, muted, false)
+	r.text(im, 186, ky+23, fmt.Sprintf("%.0f", r.maxSpeed*3.6), 11, muted, false)
 	r.text(im, 255, ky+4, "Dashed: centreline reference", 11, muted, false)
 	// World scale bar.
 	meters := 20.0
@@ -383,7 +386,7 @@ func (r *Renderer) drawRoad(im *image.RGBA) {
 	}
 	for i := 1; i < len(r.result.Nodes); i++ {
 		a, b := r.result.Nodes[i-1], r.result.Nodes[i]
-		line(im, r.projected(a.Position), r.projected(b.Position), 2.8, speedColor((a.Speed+b.Speed)/2/math.Max(r.maxSpeed, 1)))
+		line(im, r.projected(a.Position), r.projected(b.Position), 2.8, speedColor(((a.Speed+b.Speed)/2-r.minSpeed)/math.Max(r.maxSpeed-r.minSpeed, 1)))
 	}
 	for _, idx := range []int{0, len(road) - 1} {
 		s := road[idx]
