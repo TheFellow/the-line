@@ -213,7 +213,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		if command == "render" {
 			err = output(a.out, func(w io.Writer) error { return png.Encode(w, renderer.Frame(a.at)) })
 		} else {
-			err = writeAnimation(a, renderer, result.Duration)
+			err = writeAnimation(a, renderer, math.Max(result.Duration, result.CenterDuration))
 		}
 		if err != nil {
 			return err

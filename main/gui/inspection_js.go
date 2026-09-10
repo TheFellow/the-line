@@ -10,6 +10,7 @@ import (
 	"math"
 	"syscall/js"
 
+	"github.com/TheFellow/the-line/pkg/render"
 	"github.com/TheFellow/the-line/pkg/solver"
 	"github.com/TheFellow/the-line/pkg/track"
 )
@@ -66,33 +67,67 @@ func inspectFrame(g *game) {
 		p := g.drag.Position(g.renderer, g.pointerX, g.pointerY)
 		preview = &p
 	}
+	current := g.result.At(g.clock)
+	center, _ := g.result.CenterAtStation(current.Station)
+	viewport := g.renderer.RoadViewport()
+	end := g.result.Nodes[len(g.result.Nodes)-1]
+	centerEnd := g.result.CenterAt(math.Inf(1))
 	data := struct {
-		Scene         track.Scene       `json:"scene"`
-		SolvedScene   track.Scene       `json:"solvedScene"`
-		View          string            `json:"view"`
-		Width         int               `json:"width"`
-		Height        int               `json:"height"`
-		Points        [][2]float64      `json:"points"`
-		Controls      map[string][4]int `json:"controls"`
-		Origin        [2]float64        `json:"origin"`
-		AxisX         [2]float64        `json:"axisX"`
-		AxisY         [2]float64        `json:"axisY"`
-		Selected      int               `json:"selected"`
-		Dragging      bool              `json:"dragging"`
-		Pointer       [2]float64        `json:"pointer"`
-		Preview       *track.Vec3       `json:"preview"`
-		Busy          bool              `json:"busy"`
-		CanUndo       bool              `json:"canUndo"`
-		CanRedo       bool              `json:"canRedo"`
-		Status        string            `json:"status"`
-		Playing       bool              `json:"playing"`
-		Time          float64           `json:"time"`
-		Duration      float64           `json:"duration"`
-		Nodes         int               `json:"nodes"`
-		LineDigest    string            `json:"lineDigest"`
-		ForceResidual float64           `json:"forceResidual"`
-		Updates       int               `json:"updates"`
-	}{g.ed.Scene(), g.solvedScene, g.opts.view, g.opts.width, g.opts.height, points, controls, project(track.Vec3{}), project(track.Vec3{X: 1}), project(track.Vec3{Y: 1}), g.ed.Selected(), g.drag != nil, [2]float64{g.pointerX, g.pointerY}, preview, g.busy, g.ed.CanUndo(), g.ed.CanRedo(), g.status, g.playing, g.clock, g.result.Duration, len(g.result.Nodes), inspection.digest, g.result.MaxForceResidual, g.frame}
+		Scene             track.Scene       `json:"scene"`
+		SolvedScene       track.Scene       `json:"solvedScene"`
+		View              string            `json:"view"`
+		Width             int               `json:"width"`
+		Height            int               `json:"height"`
+		Points            [][2]float64      `json:"points"`
+		Controls          map[string][4]int `json:"controls"`
+		Origin            [2]float64        `json:"origin"`
+		AxisX             [2]float64        `json:"axisX"`
+		AxisY             [2]float64        `json:"axisY"`
+		Selected          int               `json:"selected"`
+		Dragging          bool              `json:"dragging"`
+		Pointer           [2]float64        `json:"pointer"`
+		Preview           *track.Vec3       `json:"preview"`
+		Busy              bool              `json:"busy"`
+		CanUndo           bool              `json:"canUndo"`
+		CanRedo           bool              `json:"canRedo"`
+		Status            string            `json:"status"`
+		Playing           bool              `json:"playing"`
+		Time              float64           `json:"time"`
+		Duration          float64           `json:"duration"`
+		Nodes             int               `json:"nodes"`
+		LineDigest        string            `json:"lineDigest"`
+		ForceResidual     float64           `json:"forceResidual"`
+		Updates           int               `json:"updates"`
+		Camera            render.Camera     `json:"camera"`
+		CameraDragging    bool              `json:"cameraDragging"`
+		Charting          bool              `json:"charting"`
+		Comparison        bool              `json:"comparison"`
+		Rate              float64           `json:"rate"`
+		PlaybackDuration  float64           `json:"playbackDuration"`
+		CenterDuration    float64           `json:"centerDuration"`
+		Current           solver.Node       `json:"current"`
+		CenterCurrent     solver.Node       `json:"centerCurrent"`
+		SameStationCenter solver.Node       `json:"sameStationCenter"`
+		Delta             float64           `json:"delta"`
+		RoadViewport      [4]int            `json:"roadViewport"`
+		SolveRequests     int               `json:"solveRequests"`
+		StationBounds     [2]float64        `json:"stationBounds"`
+		EndNode           solver.Node       `json:"endNode"`
+		CenterEndNode     solver.Node       `json:"centerEndNode"`
+	}{
+		Scene: g.ed.Scene(), SolvedScene: g.solvedScene, View: g.opts.view,
+		Width: g.opts.width, Height: g.opts.height, Points: points, Controls: controls,
+		Origin: project(track.Vec3{}), AxisX: project(track.Vec3{X: 1}), AxisY: project(track.Vec3{Y: 1}),
+		Selected: g.ed.Selected(), Dragging: g.drag != nil, Pointer: [2]float64{g.pointerX, g.pointerY}, Preview: preview,
+		Busy: g.busy, CanUndo: g.ed.CanUndo(), CanRedo: g.ed.CanRedo(), Status: g.status, Playing: g.playing,
+		Time: g.clock, Duration: g.result.Duration, Nodes: len(g.result.Nodes), LineDigest: inspection.digest,
+		ForceResidual: g.result.MaxForceResidual, Updates: g.frame,
+		Camera: g.renderer.Camera(), CameraDragging: g.cameraDrag != nil, Charting: g.charting,
+		Comparison: g.comparison, Rate: g.rate, PlaybackDuration: g.playbackDuration(), CenterDuration: g.result.CenterDuration,
+		Current: current, CenterCurrent: g.result.CenterAt(g.clock), SameStationCenter: center, Delta: current.Time - center.Time,
+		RoadViewport: [4]int{viewport.Min.X, viewport.Min.Y, viewport.Max.X, viewport.Max.Y}, SolveRequests: g.solveRequests,
+		StationBounds: [2]float64{g.result.Nodes[0].Station, end.Station}, EndNode: end, CenterEndNode: centerEnd,
+	}
 	encoded, err := json.Marshal(data)
 	if err != nil {
 		panic(err)

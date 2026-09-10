@@ -86,7 +86,9 @@ func (g *game) cameraMouse(x, y float64) bool {
 	_, wheelY := ebiten.Wheel()
 	if wheelY != 0 {
 		c := g.renderer.Camera()
-		c.Zoom *= math.Exp(math.Max(-4, math.Min(4, wheelY*.12)))
+		// Browser wheels can report tens of pixels per event while native wheels
+		// report steps. Bound each update before applying the zoom sensitivity.
+		c.Zoom *= math.Exp(math.Max(-4, math.Min(4, wheelY)) * .12)
 		if err := g.renderer.SetCamera(c); err != nil {
 			g.recordError(err)
 		}

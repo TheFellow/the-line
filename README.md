@@ -22,12 +22,18 @@ go run ./main/cli presets
 
 ## Live editor
 
-Hold the left mouse button on a numbered circular handle, drag it, and release to recompute the line. Handles highlight under the pointer; amber road edges preview the change while dragging. Press Escape to cancel a drag. Switching views, losing focus, or leaving the canvas also cancels an unfinished gesture. The road surface itself is not a drag target. Use the sidebar to change width, bank, elevation and surface, add or delete controls, switch vehicles and cycle the built-in sequences. Playback continues while a background solve runs. A rejected edit restores the last valid scene and its undo/redo history. Dragging changes the ground-plane position while preserving elevation; use the elevation controls to change height. The elevated camera is fixed; Tab switches between plan and elevated views.
+Hold the left mouse button on a numbered circular handle, drag it, and release to recompute the line. Handles highlight under the pointer; amber road edges preview the change while dragging. Press Escape to cancel a drag. Switching views, losing focus, or leaving the canvas also cancels an unfinished gesture. The road surface itself is not a drag target. Use the sidebar to change width, bank, elevation and surface, add or delete controls, switch vehicles and cycle the built-in sequences. Playback continues while a background solve runs. A rejected edit restores the last valid scene and its undo/redo history. Dragging changes the ground-plane position while preserving elevation; use the elevation controls to change height. Right-drag or Alt+left-drag to orbit the elevated camera; middle-drag or Shift+left-drag pans, and the wheel zooms. Fit / Reset restores the framing. Camera gestures start in the road viewport and preserve geometry and undo history. Tab switches between plan and elevated views.
 
 | Control | Action |
 | --- | --- |
 | Space / playback button | Pause or resume |
-| Timeline | Scrub the simulated time |
+| Timeline | Scrub shared elapsed time |
+| Speed chart | Inspect the cars at the same road station; drag to seek and pause |
+| Right-drag / Alt+left-drag | Orbit the elevated camera |
+| Middle-drag / Shift+left-drag | Pan in either view |
+| Mouse wheel / Fit button | Zoom / reset camera |
+| Ghost button | Toggle the centreline reference and its longer playback timeline |
+| Speed button | Cycle 1×, 2×, 0.25× and 0.5× playback |
 | Tab / view button | Switch plan and elevated views |
 | Home | Restart the sequence |
 | `[` / `]` | Select the previous / next control |
@@ -36,9 +42,15 @@ Hold the left mouse button on a numbered circular handle, drag it, and release t
 | Cmd/Ctrl+N | Start a new sequence |
 | Cmd/Ctrl+S / Cmd/Ctrl+O | Save / load the displayed file path |
 | Cmd/Ctrl+Z / Cmd/Ctrl+Shift+Z | Undo / redo |
-| Escape | Cancel an active drag, otherwise close the studio |
+| Escape | Cancel an active geometry, camera or scrubbing gesture; otherwise close the studio |
 
 Click the file path to edit it, use Cmd/Ctrl+A to clear it, and Enter to confirm. Vehicle JSON examples and editable corner fixtures are in [examples](examples/). Custom vehicle files can be used with CLI solving/rendering; the live vehicle button cycles the built-in presets.
+
+The cyan outlined ghost is the verified centreline reference at the **same elapsed time**. The speed chart compares both trajectories on a shared road-distance and speed scale. Its signed delta is optimized time minus reference time at the **same road station**: negative means the optimized line is ahead. Click or drag the chart to investigate an apex, braking approach or exit; use slow motion to watch the two cars separate.
+
+With the ghost enabled, playback continues until both cars finish; the faster car stays at its open-sequence endpoint and the timeline marks its finish. Disabling the ghost restores the optimized-only duration. The sidebar shows power-to-weight, grip multiplier and requested versus realized endpoint speeds. Equal speed caps can produce different actual entry speeds, so the comparison is not necessarily an equal-start race. These remain illustrative vehicles and a quasi-static model.
+
+JSON now includes both trajectories and a shared `station` field; CSV appends `station_m` while preserving existing columns. [Trajectory queries and comparison exports](docs/TRAJECTORIES.md) explains distance, interpolation and delta conventions. PNG/GIF exports include the same comparison composition; complete GIFs run through the reference finish.
 
 ## CLI
 
@@ -100,8 +112,10 @@ make verify-headless
   --capture artifacts/editor.png --report artifacts/editor-report.json
 ```
 
-Headless verification requires Node.js and Chrome (automatically found in its standard macOS location; set `LINE_CHROME_PATH` elsewhere). It builds the same Go editor for WebAssembly with a read-only inspection bridge, sends real browser input through Ebitengine, and writes screenshots and a JSON report under `artifacts/browser/`.
+Headless verification requires Node.js and Chrome (automatically found in its standard macOS location; set `LINE_CHROME_PATH` elsewhere). It builds the same Go editor for WebAssembly with a read-only inspection bridge, sends real browser input through Ebitengine, and writes screenshots and a JSON report under `artifacts/browser/`. For focused iteration, run `node tools/browser/verify.mjs --scope=analysis --case=elevated-retina`; the default runs both the original interaction checks and the camera/comparison checks in both configurations.
 
 Measured solver accuracy, native frame rates, and verification commands are recorded in [docs/VALIDATION.md](docs/VALIDATION.md).
 
 The independent pre-implementation research review lives in [research/CRITIQUE.md](research/CRITIQUE.md), alongside [sources and design rationale](research/README.md). The public packages separate `track`, `vehicle`, `solver` and `render`; `internal/editor` owns transactional editing and `internal/cli` owns commands. Executable wiring is under `main/cli` and `main/gui`.
+
+The [fresh enthusiast review](docs/ENTHUSIAST_REVIEW.md) records the rationale and acceptance criteria for camera control, the centreline ghost and shared-station analysis.

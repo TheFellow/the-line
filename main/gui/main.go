@@ -48,6 +48,7 @@ type game struct {
 	texture              *ebiten.Image
 	replies              chan solved
 	busy                 bool
+	solveRequests        int
 	rollback             func()
 	playing              bool
 	clock                float64
@@ -57,8 +58,13 @@ type game struct {
 	captured             bool
 	captureErr           error
 	started              time.Time
+	cameraDrag           *cameraGesture
+	resetCamera          bool
 	drag                 *editor.Drag
 	scrubbing            bool
+	charting             bool
+	comparison           bool
+	rate                 float64
 	pointerCancelled     bool
 	pointerX, pointerY   float64
 	hover                int
@@ -122,7 +128,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	g := &game{opts: o, ed: ed, solvedScene: s, renderer: r, result: result, config: v, playing: true, replies: make(chan solved, 1), started: time.Now(), nextDemo: 20}
+	g := &game{opts: o, ed: ed, solvedScene: s, renderer: r, result: result, config: v, playing: true, comparison: true, rate: 1, replies: make(chan solved, 1), started: time.Now(), nextDemo: 20}
 	g.texture = ebiten.NewImage(o.width, o.height)
 	attachInspection(g)
 	ebiten.SetWindowSize(o.width, o.height)
@@ -175,15 +181,24 @@ func (g *game) recordError(err error) {
 }
 
 func (g *game) rebuild() error {
-	r, err := render.New(g.solvedScene, g.result, g.config, render.Options{Width: g.opts.width, Height: g.opts.height, View: g.opts.view})
+	opts := render.Options{Width: g.opts.width, Height: g.opts.height, View: g.opts.view}
+	if !g.resetCamera || g.busy {
+		camera := g.renderer.Camera()
+		opts.Camera = &camera
+	}
+	r, err := render.New(g.solvedScene, g.result, g.config, opts)
 	if err != nil {
 		return err
 	}
 	g.renderer = r
+	if !g.busy {
+		g.resetCamera = false
+	}
 	return nil
 }
 
 func (g *game) queueSolve(rollback func()) {
+	g.solveRequests++
 	g.busy = true
 	g.rollback = rollback
 	g.setStatus("Computing a feasible line… playback continues")
@@ -214,22 +229,26 @@ func (g *game) Update() error {
 			}
 			g.recordError(fmt.Errorf("edit reverted: %w", reply.err))
 		} else {
-			fraction := g.clock / math.Max(g.result.Duration, 1)
+			fraction := g.clock / g.playbackDuration()
 			g.result, g.config = reply.result, reply.config
 			g.solvedScene = g.ed.Scene()
-			g.clock = fraction * g.result.Duration
+			g.clock = fraction * g.playbackDuration()
+			if g.resetCamera {
+				g.cancelPointer()
+			}
 			if err := g.rebuild(); err != nil {
 				return err
 			}
 			g.setStatus(fmt.Sprintf("Solved · %.2f s · %.2f s faster than centreline", g.result.Duration, g.result.CenterDuration-g.result.Duration))
 		}
 		g.rollback = nil
+		g.resetCamera = false
 	default:
 	}
 	if g.playing {
-		g.clock += 1.0 / 60
-		if g.clock > g.result.Duration {
-			g.clock = math.Mod(g.clock, g.result.Duration)
+		g.clock += g.rate / 60
+		if g.clock > g.playbackDuration() {
+			g.clock = math.Mod(g.clock, g.playbackDuration())
 		}
 	}
 	if g.opts.demo {
@@ -247,7 +266,7 @@ func (g *game) Update() error {
 		return nil
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
-		if g.drag != nil || g.scrubbing {
+		if g.drag != nil || g.scrubbing || g.charting || g.cameraDrag != nil {
 			g.cancelPointer()
 			return nil
 		}
@@ -311,6 +330,11 @@ func (g *game) Update() error {
 
 func (g *game) mouse() {
 	x, y := ebiten.CursorPosition()
+	g.pointerX, g.pointerY = float64(x), float64(y)
+	if g.cameraMouse(float64(x), float64(y)) {
+		ebiten.SetCursorShape(ebiten.CursorShapeMove)
+		return
+	}
 	g.pointer(float64(x), float64(y), inpututil.IsMouseButtonJustPressed(ebiten.MouseButtonLeft), ebiten.IsMouseButtonPressed(ebiten.MouseButtonLeft), inpututil.IsMouseButtonJustReleased(ebiten.MouseButtonLeft))
 	shape := ebiten.CursorShapeDefault
 	if g.hover >= 0 {
@@ -324,11 +348,13 @@ func (g *game) mouse() {
 
 // cancelPointer discards an incomplete gesture and waits for a fresh press.
 func (g *game) cancelPointer() {
-	if g.drag != nil || g.scrubbing {
+	if g.drag != nil || g.scrubbing || g.charting || g.cameraDrag != nil {
 		g.setStatus("Gesture cancelled")
 	}
 	g.drag = nil
+	g.cameraDrag = nil
 	g.scrubbing = false
+	g.charting = false
 	g.hover = -1
 	g.pointerCancelled = true
 }
@@ -346,7 +372,7 @@ func (g *game) pointer(x, y float64, pressed, held, released bool) {
 		}
 	}
 	if x < 0 || y < 0 || x >= float64(g.opts.width) || y >= float64(g.opts.height) {
-		if g.drag != nil || g.scrubbing {
+		if g.drag != nil || g.scrubbing || g.charting || g.cameraDrag != nil {
 			g.cancelPointer()
 		}
 		return
@@ -358,18 +384,31 @@ func (g *game) pointer(x, y float64, pressed, held, released bool) {
 		}
 		return
 	}
+	if g.charting {
+		g.seekStation(x)
+		if released || !held {
+			g.charting = false
+		}
+		return
+	}
 	for key, rect := range g.renderer.Controls() {
 		if image.Pt(int(x), int(y)).In(rect) && g.drag == nil {
 			if pressed {
 				if key == "scrub" {
 					g.scrubbing = true
 					g.scrub(int(x))
+				} else if key == "chart" {
+					g.charting = true
+					g.seekStation(x)
 				} else {
 					g.action(key)
 				}
 			}
 			return
 		}
+	}
+	if g.drag == nil && !image.Pt(int(x), int(y)).In(g.renderer.RoadViewport()) {
+		return
 	}
 	if !g.busy {
 		g.hover = editor.Pick(g.ed.Scene(), g.renderer, x, y)
@@ -401,7 +440,7 @@ func (g *game) pointer(x, y float64, pressed, held, released bool) {
 
 func (g *game) scrub(x int) {
 	rect := g.renderer.Controls()["scrub"]
-	g.clock = math.Max(0, math.Min(1, float64(x-rect.Min.X)/float64(rect.Dx()))) * g.result.Duration
+	g.clock = math.Max(0, math.Min(1, float64(x-rect.Min.X)/float64(rect.Dx()))) * g.playbackDuration()
 	g.playing = false
 }
 
@@ -410,6 +449,22 @@ func (g *game) action(key string) {
 	s := g.ed.Scene()
 	i := g.ed.Selected()
 	switch key {
+	case "comparison":
+		g.comparison = !g.comparison
+		g.clock = math.Min(g.clock, g.playbackDuration())
+		return
+	case "rate":
+		switch g.rate {
+		case .25:
+			g.rate = .5
+		case .5:
+			g.rate = 1
+		case 1:
+			g.rate = 2
+		default:
+			g.rate = .25
+		}
+		return
 	case "play":
 		g.playing = !g.playing
 		return
@@ -420,8 +475,13 @@ func (g *game) action(key string) {
 	case "restart":
 		g.clock = 0
 		return
+	case "fit":
+		g.cancelPointer()
+		g.renderer.ResetCamera()
+		g.setStatus("Camera fitted to the road")
+		return
 	case "view":
-		if g.drag != nil || g.scrubbing {
+		if g.drag != nil || g.scrubbing || g.charting || g.cameraDrag != nil {
 			g.cancelPointer()
 		}
 		if g.opts.view == "3d" {
@@ -444,7 +504,7 @@ func (g *game) action(key string) {
 		g.fileDraft = g.opts.file
 		return
 	}
-	if g.drag != nil {
+	if g.drag != nil || g.cameraDrag != nil {
 		g.setStatus("Release the handle to apply the edit, or press Esc to cancel")
 		return
 	}
@@ -572,6 +632,7 @@ func (g *game) action(key string) {
 		g.recordError(err)
 		return
 	}
+	g.resetCamera = key == "load" || key == "new" || key == "preset"
 	g.queueSolve(rollback)
 }
 
@@ -654,7 +715,7 @@ func (g *game) Draw(screen *ebiten.Image) {
 		path = g.fileDraft + "|"
 		status = "Editing save / load path · ENTER confirm · ESC cancel"
 	}
-	state := render.State{Selected: g.ed.Selected(), Playing: g.playing, Status: status, FPS: ebiten.ActualFPS(), FilePath: path}
+	state := render.State{Selected: g.ed.Selected(), Playing: g.playing, Status: status, FPS: ebiten.ActualFPS(), FilePath: path, Comparison: g.comparison, Rate: g.rate}
 	if g.hover >= 0 && !g.busy {
 		state.Hover = &g.hover
 	}
