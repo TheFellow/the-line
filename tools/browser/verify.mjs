@@ -6,15 +6,22 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import { presentationChecks } from "./presentation.mjs";
+import { closedChecks } from "./closed.mjs";
+import { roadmapChecks } from "./roadmap.mjs";
+import { authoringChecks } from "./authoring.mjs";
+import { manualChecks } from "./manual.mjs";
+import { instrumentationChecks } from "./instrumentation.mjs";
 
 const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../..",
 );
-const artifacts = path.join(root, "artifacts/browser");
+const artifactOption = process.argv.find(a => a.startsWith("--artifacts="))?.slice(12);
+const artifacts = path.resolve(root, artifactOption || "artifacts/browser");
 const selected = process.argv.find((a) => a.startsWith("--case="))?.slice(7);
 const scope = process.argv.find((a) => a.startsWith("--scope="))?.slice(8) || "all";
-assert.ok(["interaction", "analysis", "all"].includes(scope), `Unknown scope: ${scope}`);
+assert.ok(["interaction", "analysis", "setup", "instrumentation", "manual", "authoring", "presentation", "closed", "roadmap", "all"].includes(scope), `Unknown scope: ${scope}`);
 const cases = [
   { name: "elevated-retina", view: "3d", width: 1000, height: 700, dpr: 2 },
   { name: "plan", view: "2d", width: 1440, height: 900, dpr: 1 },
@@ -49,7 +56,7 @@ if (!process.argv.includes("--skip-build")) {
   );
 }
 const html = `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#0f151d}</style></head><body><script src="/wasm_exec.js"></script><script>
-const go=new Go();const params=new URLSearchParams(location.search);go.argv=['studio','--preset','banked','--view',params.get('view')||'2d'];
+const go=new Go();const params=new URLSearchParams(location.search);go.argv=['studio','--preset',params.get('preset')||'banked','--view',params.get('view')||'2d'];
 go.exit=(code)=>{window.applicationExit=code};
 WebAssembly.instantiateStreaming(fetch('/studio.wasm'),go.importObject).then(r=>go.run(r.instance)).catch(e=>{window.bootError=String(e)});
 </script></body></html>`;
@@ -98,6 +105,12 @@ try {
 const base = `http://127.0.0.1:${server.address().port}`;
 const reports = [];
 
+async function startPreset(page, c, preset = "banked") {
+  await page.goto(`${base}/?view=${c.view}&preset=${preset}`);
+  await wait(page, s => s.updates > 5 && !s.busy, "fixture startup");
+  if ((await state(page)).playing) await control(page, "play");
+  await wait(page, s => !s.playing, "pause fixture");
+}
 async function state(page) {
   return page.evaluate(() => JSON.parse(window.theLineSnapshot()));
 }
@@ -114,9 +127,9 @@ async function wait(page, predicate, label) {
       { timeout: 120000, polling: 50 },
     )
     .catch(async (e) => {
-      throw new Error(
-        `${label}: ${e.message}\n${JSON.stringify(await state(page))}`,
-      );
+      const snapshot = await state(page);
+      const summary = Object.fromEntries(["view", "status", "busy", "generation", "pointer", "dragging", "manualDragging", "cameraDragging", "updates"].map(key => [key, snapshot[key]]));
+      throw new Error(`${label}: ${e.message}\n${JSON.stringify(summary)}`);
     });
   return state(page);
 }
@@ -152,6 +165,7 @@ async function click(page, x, y) {
 async function control(page, name) {
   const s = await state(page);
   const r = s.controls[name];
+  assert.ok(r, `Control ${name} is unavailable in ${s.view} view`);
   const p = await coords(page, s, (r[0] + r[2]) / 2, (r[1] + r[3]) / 2);
   await click(page, p.x, p.y);
 }
@@ -241,8 +255,19 @@ function expectedDrop(gesture, held) {
 }
 async function seekTimeline(page, fraction) {
   const s = await state(page), r = s.controls.scrub;
-  const p = await coords(page, s, r[0] + fraction * (r[2] - r[0]), (r[1] + r[3]) / 2);
-  await click(page, p.x, p.y);
+  const x = r[0] + fraction * (r[2] - r[0]);
+  const p = await coords(page, s, x, (r[1] + r[3]) / 2);
+  if (fraction >= 1) {
+    // Hit rectangles exclude their right edge. Capture inside, then drag to
+    // the exact endpoint just as a user does; DPR rounding must not decide it.
+    const start = await coords(page, s, r[2] - 2, (r[1] + r[3]) / 2);
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down(); await tick(page);
+    await page.mouse.move(p.x, p.y); await tick(page);
+    await page.mouse.up(); await tick(page);
+  } else {
+    await click(page, p.x, p.y);
+  }
   return state(page);
 }
 function comparisonConsistent(s) {
@@ -357,7 +382,8 @@ async function analysisChecks(page, c, check) {
   });
 
   await check("preset and vehicle changes replace both verified trajectories", async () => {
-    for (const name of ["Ridge to River", "The Switchback", "Rhythm Section"]) {
+    for (const name of ["Ridge to River", "Rhythm Section"]) {
+      if (name === "Rhythm Section") await startPreset(page, c, "hairpin");
       const before = await state(page);
       await control(page, "preset");
       const next = await wait(page, (s) => !s.busy && s.scene.name === s.solvedScene.name, "preset comparison solves");
@@ -529,7 +555,7 @@ try {
       await control(page, "play");
       await wait(page, (s) => !s.playing, "pause animation");
       const original = await state(page);
-      if (scope !== "analysis") {
+      if (scope === "interaction" || scope === "all") {
         currentCheck = "click without movement";
         console.log(`${c.name}: ${currentCheck}`);
         const p = await coords(page, original, ...original.points[3]);
@@ -868,13 +894,65 @@ try {
         await unchanged(page, playbackBefore);
         checks.push(currentCheck);
       }
-      if (scope !== "interaction") {
+      if (scope === "analysis" || scope === "all") {
         measurements = await analysisChecks(page, c, async (name, run) => {
           currentCheck = name;
           console.log(`${c.name}: ${name}`);
           await run();
           checks.push(name);
         });
+      }
+      if (scope === "setup" || scope === "roadmap" || scope === "all") {
+        await startPreset(page, c);
+        await roadmapChecks(page, c, async (name, run) => {
+          currentCheck = name;
+          console.log(`${c.name}: ${name}`);
+          await run();
+          checks.push(name);
+        }, { state, wait, control, tick, near, coords, click, key, seekTimeline, artifacts, startPreset });
+      }
+      if (scope === "instrumentation" || scope === "roadmap" || scope === "all") {
+        await startPreset(page, c);
+        await instrumentationChecks(page, c, async (name, run) => {
+          currentCheck = name;
+          console.log(`${c.name}: ${name}`);
+          await run();
+          checks.push(name);
+        }, { state, wait, control, tick, near, coords, click, key, seekTimeline, artifacts, startPreset });
+      }
+      if (scope === "manual" || scope === "roadmap" || scope === "all") {
+        await startPreset(page, c);
+        await manualChecks(page, c, async (name, run) => {
+          currentCheck = name;
+          console.log(`${c.name}: ${name}`);
+          await run();
+          checks.push(name);
+        }, { state, wait, control, tick, near, coords, click, key, seekTimeline, artifacts, startPreset });
+      }
+      if (scope === "authoring" || scope === "roadmap" || scope === "all") {
+        await startPreset(page, c);
+        await authoringChecks(page, c, async (name, run) => {
+          currentCheck = name;
+          console.log(`${c.name}: ${name}`);
+          await run();
+          checks.push(name);
+        }, { state, wait, control, tick, near, coords, click, key, seekTimeline, artifacts, startPreset });
+      }
+      if (scope === "presentation" || scope === "roadmap" || scope === "all") {
+        await startPreset(page, c, "banked");
+        await presentationChecks(page, c, async (name, run) => {
+          currentCheck = name;
+          console.log(`${c.name}: ${name}`);
+          await run(); checks.push(name);
+        }, { state, wait, control, tick, near, coords, click, key, seekTimeline, artifacts, startPreset });
+      }
+      if (scope === "closed" || scope === "roadmap" || scope === "all") {
+        await startPreset(page, c, "club-loop");
+        await closedChecks(page, c, async (name, run) => {
+          currentCheck = name;
+          console.log(`${c.name}: ${name}`);
+          await run(); checks.push(name);
+        }, { state, wait, control, tick, near, coords, click, key, seekTimeline, artifacts, startPreset });
       }
       assert.deepEqual(errors, [], "browser errors");
       const final = await state(page);

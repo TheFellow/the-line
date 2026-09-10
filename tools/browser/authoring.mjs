@@ -7,9 +7,12 @@ export async function authoringChecks(page, c, check, h) {
   const left = p => p.width_left ?? p.width / 2;
   async function upload(text, filename) {
     const selected = page.waitForEvent("filechooser");
-    await control(page, "import-csv");
+    // The native chooser can suspend game updates. Complete it while the
+    // ordinary click helper is still waiting for its post-input frames.
+    const clicking = control(page, "import-csv");
     const chooser = await selected;
     await chooser.setFiles({ name:filename, mimeType:"text/csv", buffer:Buffer.from(text) });
+    await clicking;
   }
   await check("asymmetric road-width controls commit and undo one physical edit", async () => {
     const before = await settled();
@@ -54,7 +57,7 @@ export async function authoringChecks(page, c, check, h) {
     assert.deepEqual(undone.scene, before.scene);
     assert.equal(undone.canRedo, true);
     await upload("x,y,z,width_left,width_right\n0,0,0,6,6\n0,0,0,6,6\n", "bad-centreline.csv");
-    const rejected = await wait(page, s => s.status.startsWith("ERROR"), "invalid CSV rejected");
+    const rejected = await wait(page, s => s.status.includes("must be at least 1 metre apart"), "invalid CSV rejected");
     assert.deepEqual(rejected.scene, undone.scene);
     assert.equal(rejected.lineDigest, undone.lineDigest);
     assert.equal(rejected.canRedo, true);

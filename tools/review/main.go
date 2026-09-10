@@ -39,7 +39,7 @@ func run() error {
 		return err
 	}
 	names := track.Presets()
-	gallery := image.NewRGBA(image.Rect(0, 0, 1440, 450*len(names)))
+	gallery := image.NewRGBA(image.Rect(0, 0, 2160, 450*len(names)))
 	var report []measurement
 	for row, name := range names {
 		s, err := track.Preset(name)
@@ -52,7 +52,7 @@ func run() error {
 			return fmt.Errorf("%s: %w", name, err)
 		}
 		m := measurement{Preset: name, Duration: r.Duration, Reference: r.CenterDuration, ForceResidual: r.MaxForceResidual, SolveMillis: time.Since(started).Milliseconds()}
-		for col, view := range []string{"2d", "3d"} {
+		for col, view := range []string{"2d", "3d", "perspective"} {
 			renderer, err := render.New(s, r, v, render.Options{Width: 1440, Height: 900, View: view})
 			if err != nil {
 				return err

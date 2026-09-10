@@ -33,4 +33,14 @@ export async function presentationChecks(page,c,check,h){
   await control(page,"analysis");
   if(before.view==="2d"){await control(page,"view");await wait(page,s=>s.view==="2d","restore plan view")}
  });
+ await check("local refinement retains the best verified line and exposes diagnostics",async()=>{
+  await control(page,"analysis");const before=await state(page);
+  await control(page,"polish");const after=await wait(page,s=>!s.busy&&!s.provisional,"local refinement completes");
+  assert.ok(after.polishCandidates>0,"actual polish candidates evaluated");
+  assert.ok(after.duration<=before.duration+1e-9,"refinement never discards faster verified input");
+  assert.ok(after.forceResidual<.0005);assert.deepEqual(after.scene,before.scene);
+  await page.screenshot({path:path.join(artifacts,`${c.name}-search-diagnostics.png`)});
+  await control(page,"analysis");
+ });
+
 }

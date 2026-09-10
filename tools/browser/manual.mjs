@@ -4,7 +4,7 @@ import path from "node:path";
 // Actual pointer/key/storage workflows; no application-state injection.
 export async function manualChecks(page, c, check, h) {
   const { state, wait, control, tick, near, coords, key, seekTimeline, artifacts } = h;
-  const settled = () => wait(page, s => !s.busy, "authored study settles");
+  const settled = () => wait(page, s => !s.busy && !s.manualDragging, "authored study settles");
   async function dragByOffset(amount) {
     const before = await state(page), viewport = before.roadViewport;
     const candidates = before.manualPoints.map((point,index) => ({point,index,axis:before.manualAxes[index]}))
@@ -79,8 +79,26 @@ export async function manualChecks(page, c, check, h) {
     assert.equal(stale.referenceStale,true);near(stale.playbackDuration,stale.duration,"stale ghost disabled");
     await page.screenshot({path:path.join(artifacts,`${c.name}-stale-reference.png`)});
     await control(page,"undo");const valid=await settled();assert.equal(valid.referenceStale,false);
+    if (!(await state(page)).manualMode) await control(page,"manual");
+    const authored=await settled();
     await control(page,"manual-optimize");const optimized=await settled();
-    assert.equal(optimized.manualMode,false);assert.ok(optimized.duration<=valid.duration+1e-9,"seeded optimization retains better verified manual candidate");
+    assert.equal(optimized.manualMode,false);assert.ok(optimized.duration<=authored.duration+1e-9,"seeded optimization retains better verified manual candidate");
     await control(page,"unpin");await control(page,"fit");
   });
+  await check("optimized study selection survives save, load, undo and vehicle changes",async()=>{
+    const before=await settled();assert.equal(before.scene.study.active_line,"optimized");
+    const hypothesis=before.scene.study.manual;
+    await control(page,"save");assert.match((await state(page)).status,/Saved/);
+    await control(page,"manual");const authored=await settled();assert.equal(authored.scene.study.active_line,"manual");
+    await control(page,"load");const loaded=await settled();assert.equal(loaded.manualMode,false);assert.equal(loaded.scene.study.active_line,"optimized");
+    assert.deepEqual(loaded.scene.study.manual,hypothesis,"optimization retains the authored hypothesis");
+    await control(page,"undo");const undone=await settled();assert.equal(undone.manualMode,true);assert.equal(undone.scene.study.active_line,"manual");
+    await control(page,"redo");const redone=await settled();assert.equal(redone.manualMode,false);assert.equal(redone.lineDigest,loaded.lineDigest);
+    await control(page,"vehicle");const changed=await settled();assert.equal(changed.scene.vehicle,"gt");assert.equal(changed.manualMode,false);assert.equal(changed.scene.study.active_line,"optimized");
+    assert.deepEqual(changed.scene.study.manual,hypothesis);
+    await control(page,"save");await control(page,"load");const restored=await settled();assert.equal(restored.manualMode,false);assert.equal(restored.scene.vehicle,"gt");assert.equal(restored.scene.study.active_line,"optimized");
+    assert.ok(restored.forceResidual<.0005);assert.deepEqual(restored.scene.study.manual,hypothesis);
+    await page.screenshot({path:path.join(artifacts,`${c.name}-optimized-study.png`)});
+  });
+
 }

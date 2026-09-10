@@ -3,7 +3,7 @@ import path from "node:path";
 
 // Real mouse events only; the inspection bridge remains read-only.
 export async function instrumentationChecks(page, c, check, h) {
-  const { state, control, wait, tick, coords, near, artifacts } = h;
+  const { state, control, wait, tick, coords, near, artifacts, startPreset } = h;
   const modes = ["speed", "utilization", "lateral_g", "longitudinal_g"];
   await check("fixed line scales and selectable chart channels preserve the trajectory", async () => {
     let before = await state(page);
@@ -24,12 +24,8 @@ export async function instrumentationChecks(page, c, check, h) {
     }
   });
   await check("force dot and chart cursor agree at entry, apex and exit", async () => {
+    await startPreset(page, c, "hairpin");
     let s = await state(page);
-    for (let i = 0; i < 5 && s.scene.name !== "The Switchback"; i++) {
-      const previous = s.scene.name;
-      await control(page, "preset");
-      s = await wait(page, value => !value.busy && value.scene.name !== previous, "hairpin fixture selection");
-    }
     assert.equal(s.scene.name, "The Switchback");
     const apex = s.markers.find(m => m.kind === "apex");
     assert.ok(apex, "corner fixture has a speed apex");
