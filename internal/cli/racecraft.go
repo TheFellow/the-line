@@ -10,6 +10,8 @@ import (
 	"image/png"
 	"io"
 	"math"
+	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/TheFellow/the-line/pkg/racecraft"
@@ -33,7 +35,7 @@ func runRace(args []string, stdout, stderr io.Writer) error {
 	f.StringVar(&a.out, "out", "", "output path (JSON/CSV otherwise use stdout)")
 	f.StringVar(&a.view, "view", "2d", "2d or 3d")
 	f.Float64Var(&gap, "gap", 0, "override starting station gap in metres")
-	f.Float64Var(&overspeed, "overspeed", 0, "override B entry speed-cap advantage in m/s")
+	f.Float64Var(&overspeed, "overspeed", 0, "override B minus A station-zero speed cap in m/s (realized start speeds differ)")
 	f.Float64Var(&separation, "separation", 0, "override lateral placement separation in metres")
 	f.Float64Var(&clearance, "clearance", 0, "override extra body clearance in metres")
 	f.IntVar(&a.width, "width", 960, "image width")
@@ -64,6 +66,9 @@ func runRace(args []string, stdout, stderr io.Writer) error {
 	}
 	if (format == "png" || format == "gif") && a.out == "" {
 		return fmt.Errorf("race images require --out")
+	}
+	if err := validateRaceFiles(a.out, save, file, scene); err != nil {
+		return err
 	}
 	e, err := racecraft.Example(scenario)
 	if err != nil {
@@ -104,16 +109,79 @@ func runRace(args []string, stdout, stderr io.Writer) error {
 			return err
 		}
 	}
+	if err := e.Validate(); err != nil {
+		return err
+	}
 	result, err := racecraft.Plan(context.Background(), e.Scene, e.Vehicle, e.Config)
 	if err != nil {
 		return err
 	}
+	// Each destination is replaced atomically, but the pair is not a transaction.
+	// Finish export validation and encoding before replacing saved inputs.
+	if err := writeRaceExport(a, format, e, result, stdout); err != nil {
+		return err
+	}
 	if save != "" {
+		// A newly created export can reveal an alias that did not exist during
+		// preflight, such as differently cased names on a case-insensitive volume.
+		if err := validateRaceFiles(a.out, save, file, scene); err != nil {
+			return err
+		}
 		if err := racecraft.Save(save, e); err != nil {
 			return err
 		}
 	}
-	fmt.Fprintf(stderr, "%s: %.3f s; %d completed passes; certified body clearance >= %.3f m\n", e.Config.Scenario, result.Duration, len(result.Events), result.MinClearance)
+	start := result.At(0)
+	fmt.Fprintf(stderr, "%s: %.3f s; %d completed passes; certified body clearance >= %.3f m; realized start speeds A %.3f, B %.3f m/s; requested B-A station-zero cap delta %.3f m/s\n", e.Config.Scenario, result.Duration, len(result.Events), result.MinClearance, start[0].Speed, start[1].Speed, e.Config.Overspeed)
+	return nil
+}
+
+// validateRaceFiles rejects predictable destination failures and input clobbers.
+// Saving back to --experiment is intentional; exports must have their own path.
+func validateRaceFiles(out, save, experiment, scene string) error {
+	paths := []struct {
+		flag, path, resolved string
+		info                 os.FileInfo
+	}{{flag: "out", path: out}, {flag: "save-experiment", path: save}, {flag: "experiment", path: experiment}, {flag: "scene", path: scene}}
+	for i := range paths {
+		p := &paths[i]
+		if p.path == "" {
+			continue
+		}
+		absolute, err := filepath.Abs(p.path)
+		if err != nil {
+			return err
+		}
+		dir, err := filepath.EvalSymlinks(filepath.Dir(absolute))
+		if err != nil {
+			return fmt.Errorf("--%s: %w", p.flag, err)
+		}
+		parent, err := os.Stat(dir)
+		if err != nil {
+			return fmt.Errorf("--%s: %w", p.flag, err)
+		}
+		if !parent.IsDir() {
+			return fmt.Errorf("--%s parent is not a directory", p.flag)
+		}
+		p.resolved = filepath.Join(dir, filepath.Base(absolute))
+		p.info, err = os.Stat(absolute)
+		if err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("--%s: %w", p.flag, err)
+		}
+		if i < 2 && p.info != nil && p.info.IsDir() {
+			return fmt.Errorf("--%s destination is a directory", p.flag)
+		}
+	}
+	for _, pair := range [][2]int{{0, 1}, {0, 2}, {0, 3}, {1, 3}} {
+		a, b := paths[pair[0]], paths[pair[1]]
+		if a.path != "" && b.path != "" && (a.resolved == b.resolved || a.info != nil && b.info != nil && os.SameFile(a.info, b.info)) {
+			return fmt.Errorf("--%s and --%s refer to the same file", a.flag, b.flag)
+		}
+	}
+	return nil
+}
+
+func writeRaceExport(a arguments, format string, e racecraft.Experiment, result racecraft.Result, stdout io.Writer) error {
 	if format == "png" || format == "gif" {
 		r, err := render.New(e.Scene, result.Cars[0].Path, e.Vehicle, render.Options{Width: a.width, Height: a.height, View: a.view, Race: &result})
 		if err != nil {
@@ -131,7 +199,7 @@ func runRace(args []string, stdout, stderr io.Writer) error {
 			return enc.Encode(result)
 		}
 		csvWriter := csv.NewWriter(w)
-		if err := csvWriter.Write([]string{"time_s", "a_station_m", "b_station_m", "a_speed_mps", "b_speed_mps", "a_minus_b_gap_m", "body_clearance_m"}); err != nil {
+		if err := csvWriter.Write([]string{"time_s", "a_station_m", "b_station_m", "a_speed_mps", "b_speed_mps", "a_minus_b_gap_m", "sampled_body_clearance_m"}); err != nil {
 			return err
 		}
 		for t := 0.; t <= result.Duration; t = math.Min(t+.05, result.Duration) {
