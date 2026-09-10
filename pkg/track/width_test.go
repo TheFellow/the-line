@@ -29,7 +29,7 @@ func TestVersionOneMigrationPreservesGeometryAndDigest(t *testing.T) {
 		data, _ := json.Marshal(legacy)
 		digest := fmt.Sprintf("%x", sha256.Sum256(data))
 		migrated := Migrate(old)
-		if migrated.Version != 2 || RoadDigest(old) != digest || RoadDigest(migrated) != digest {
+		if migrated.Version != 2 || legacyRoadDigest(old) != digest || RoadDigest(old) == digest || RoadDigest(migrated) != RoadDigest(old) {
 			t.Fatalf("%s migration digest changed", name)
 		}
 		a, err := SampleRoad(old, .5)
@@ -95,5 +95,24 @@ func TestAsymmetricBankedWidthsAndKerbLimits(t *testing.T) {
 	s.Points[0].WidthLeft = 1
 	if s.Validate() == nil {
 		t.Fatal("invalid side width accepted")
+	}
+}
+
+func TestTaperingKerbUsesPresentMaterial(t *testing.T) {
+	for _, reverse := range []bool{false, true} {
+		a, b := Kerb{}, Kerb{Width: 1, Surface: "asphalt"}
+		if reverse {
+			a, b = b, a
+		}
+		scene := Scene{Version: 2, Name: "Kerb taper", Points: []Point{{Width: 12, Surface: "asphalt", KerbLeft: a}, {X: 100, Width: 12, Surface: "asphalt", KerbLeft: b}}}
+		road, err := SampleRoad(scene, .5)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, sample := range road {
+			if sample.KerbLeft.Width > 0 && sample.KerbLeft.Friction() != 1 {
+				t.Fatal("taper inherited absent kerb friction")
+			}
+		}
 	}
 }

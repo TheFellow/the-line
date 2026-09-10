@@ -35,3 +35,14 @@ func TestImportRejectsOversizeTail(t *testing.T) {
 		t.Fatal("oversize trailing bytes accepted")
 	}
 }
+
+func TestImportSpreadsheetHeadersAndErrorContext(t *testing.T) {
+	csv := "\ufeffX,Y,Z,Width_Left,WIDTH_RIGHT\n0,0,0,6,6\n100,0,0,6,6\n"
+	if _, err := ImportCSV(strings.NewReader(csv), "Spreadsheet"); err != nil {
+		t.Fatal(err)
+	}
+	bad := strings.Replace(csv, "100,0,0", "0,0,0", 1)
+	if _, err := ImportCSV(strings.NewReader(bad), "Bad geometry"); err == nil || !strings.HasPrefix(err.Error(), "import centreline:") {
+		t.Fatalf("geometry error lost import context: %v", err)
+	}
+}

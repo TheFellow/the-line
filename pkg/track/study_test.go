@@ -2,8 +2,10 @@ package track
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/TheFellow/the-line/pkg/vehicle"
@@ -110,5 +112,77 @@ func TestStudyRejectsNestedReference(t *testing.T) {
 	s.Study.Reference = &PinnedLine{Scene: &s, Name: "recursive"}
 	if err := s.Study.Validate(); err == nil {
 		t.Fatal("nested reference accepted")
+	}
+}
+
+func TestRoadDigestIgnoresAbsentKerbMaterial(t *testing.T) {
+	scene, _ := Preset("hairpin")
+	before := RoadDigest(scene)
+	scene.Points[0].KerbLeft = Kerb{Surface: "ice", Grip: .2}
+	if RoadDigest(scene) != before {
+		t.Fatal("absent kerb material changed road identity")
+	}
+	scene.Points[0].KerbLeft.Width = 1
+	if RoadDigest(scene) == before {
+		t.Fatal("physical kerb missing from identity")
+	}
+}
+
+func TestPreSaltStudiesMigrateOnlyWhenSourceMatches(t *testing.T) {
+	for _, name := range []string{"hairpin", "club-loop"} {
+		scene, _ := Preset(name)
+		car, _ := vehicle.Preset("road")
+		source := scene
+		source.Points = append([]Point(nil), scene.Points...)
+		old := legacyRoadDigest(scene)
+		scene.Study = &Study{Version: 1, Manual: &ManualLine{Spacing: .5, RoadDigest: old, Offsets: []float64{0, 0}}, Reference: &PinnedLine{Name: "Saved lap", Scene: &source, Vehicle: car, Line: ManualLine{Spacing: .5, RoadDigest: old, Offsets: []float64{0, 0}}}}
+		for _, stale := range []bool{false, true} {
+			if stale {
+				scene.Points[0].Bank++
+			}
+			data, err := json.Marshal(scene)
+			if err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(t.TempDir(), "old-study.json")
+			if err := os.WriteFile(path, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := Load(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (loaded.Study.Manual.RoadDigest != RoadDigest(loaded)) != stale {
+				t.Fatal("migration changed stale status")
+			}
+			if loaded.Study.Reference.Line.RoadDigest != RoadDigest(*loaded.Study.Reference.Scene) {
+				t.Fatal("pinned source did not migrate")
+			}
+		}
+	}
+}
+
+func TestEmptyKerbsOmittedFromSceneJSON(t *testing.T) {
+	scene, _ := Preset("hairpin")
+	data, err := json.Marshal(scene)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "kerb_left") || strings.Contains(string(data), "kerb_right") {
+		t.Fatal("absent kerbs clutter saved points")
+	}
+}
+
+func TestLegacyDigestMatchesArchivedRelease(t *testing.T) {
+	// Independently captured from an isolated git archive of 6620b93.
+	for name, want := range map[string]string{
+		"hairpin":   "b89c1e4e7a7661617cd9777200ab92ff3861bb5a20bf3e8c2783879eb1b690d9",
+		"club-loop": "c36427ccb8afb9dbc9270476cdbf46cab4a4edeb1f1e998be0f96b4b31293ec9",
+		"chicane":   "661a0c9627b7478f7cc50f17dba3d1a9f3e1b9c7605d0e470a50ae2657ffb212",
+	} {
+		scene, _ := Preset(name)
+		if got := legacyRoadDigest(scene); got != want {
+			t.Fatalf("%s migration identity differs from release: %s", name, got)
+		}
 	}
 }

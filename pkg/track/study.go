@@ -100,9 +100,66 @@ func (s Study) Validate() error {
 	return nil
 }
 
-// RoadDigest identifies physical geometry and surfaces, deliberately excluding
-// names, cars, speed caps and study metadata. Setup changes remain comparable.
+// RoadInterpolantVersion identifies the geometry interpretation of saved offsets.
+// Bump this when changing centreline, width, bank or kerb-width interpolation.
+const RoadInterpolantVersion = "c2-chord-bounded-c1-v1"
+
+// RoadDigest identifies physical geometry and surfaces, excluding names, cars,
+// speed caps and study metadata. Zero-width kerb material has no physical effect.
 func RoadDigest(scene Scene) string {
+	points := append([]Point(nil), scene.Points...)
+	for i := range points {
+		p := &points[i]
+		p.WidthLeft, p.WidthRight, p.Width = p.LeftWidth(), p.RightWidth(), 0
+		if p.KerbLeft.Width == 0 {
+			p.KerbLeft = Kerb{}
+		}
+		if p.KerbRight.Width == 0 {
+			p.KerbRight = Kerb{}
+		}
+	}
+	data, _ := json.Marshal(struct {
+		Interpolant string  `json:"interpolant"`
+		Points      []Point `json:"points"`
+		Kerbs       bool    `json:"kerbs_count_as_road"`
+		Closed      bool    `json:"closed"`
+	}{RoadInterpolantVersion, points, scene.KerbsCountAsRoad, scene.Closed})
+	return fmt.Sprintf("%x", sha256.Sum256(data))
+}
+
+// Only the pre-salt format used this identical interpolant. Verify its exact
+// original digest before upgrading; a stale manual line stays stale. Do not
+// extend this migration when a future interpolant changes.
+func upgradeStudyDigests(scene *Scene) {
+	if scene.Study == nil || RoadInterpolantVersion != "c2-chord-bounded-c1-v1" {
+		return
+	}
+	upgrade := func(line *ManualLine, source Scene) {
+		if line != nil && line.RoadDigest == legacyRoadDigest(source) {
+			line.RoadDigest = RoadDigest(source)
+		}
+	}
+	upgrade(scene.Study.Manual, *scene)
+	if ref := scene.Study.Reference; ref != nil && ref.Scene != nil {
+		upgrade(&ref.Line, *ref.Scene)
+	}
+}
+
+// Preserve the original JSON field order and empty-kerb encoding for migration.
+type legacyDigestPoint struct {
+	X          float64 `json:"x"`
+	Y          float64 `json:"y"`
+	Z          float64 `json:"z"`
+	Width      float64 `json:"width,omitempty"`
+	WidthLeft  float64 `json:"width_left,omitempty"`
+	WidthRight float64 `json:"width_right,omitempty"`
+	KerbLeft   Kerb    `json:"kerb_left,omitempty"`
+	KerbRight  Kerb    `json:"kerb_right,omitempty"`
+	Bank       float64 `json:"bank"`
+	Surface    string  `json:"surface"`
+}
+
+func legacyRoadDigest(scene Scene) string {
 	// Preserve old digests for physically identical symmetric roads, including
 	// their v2 migrations, so existing manual studies keep their identity.
 	type legacyPoint struct {
@@ -123,12 +180,20 @@ func RoadDigest(scene Scene) string {
 	if legacy {
 		data, _ = json.Marshal(points)
 	} else {
-		canonical := Migrate(Scene{Version: scene.Version, Points: scene.Points})
+		canonical := Scene{Points: append([]Point(nil), scene.Points...)}
+		for i := range canonical.Points {
+			p := &canonical.Points[i]
+			p.WidthLeft, p.WidthRight, p.Width = p.LeftWidth(), p.RightWidth(), 0
+		}
+		points := make([]legacyDigestPoint, len(canonical.Points))
+		for i, p := range canonical.Points {
+			points[i] = legacyDigestPoint(p)
+		}
 		data, _ = json.Marshal(struct {
-			Points []Point `json:"points"`
-			Kerbs  bool    `json:"kerbs_count_as_road"`
-			Closed bool    `json:"closed,omitempty"`
-		}{canonical.Points, scene.KerbsCountAsRoad, scene.Closed})
+			Points []legacyDigestPoint `json:"points"`
+			Kerbs  bool                `json:"kerbs_count_as_road"`
+			Closed bool                `json:"closed,omitempty"`
+		}{points, scene.KerbsCountAsRoad, scene.Closed})
 	}
 	return fmt.Sprintf("%x", sha256.Sum256(data))
 }

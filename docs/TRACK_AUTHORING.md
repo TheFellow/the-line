@@ -74,3 +74,19 @@ new road-car study with 30/50 m/s caps and remains one undoable replacement.
 The included CSV is fictional. For a real dataset, obtain its licence, retain
 source attribution and distinguish surveyed geometry from this application's
 illustrative vehicles. Importing a centreline does not calibrate the car model.
+
+Road identities include `track.RoadInterpolantVersion`, which must change when
+geometry interpolation changes. Zero-width kerb surface/grip settings do not
+stale a study. Studies from the pre-salt C2 release migrate only when their exact
+old digest matches their source road; stale manual hypotheses remain stale.
+Both native and browser loads apply this compatibility migration.
+
+A kerb taper inherits the material of its present end; absent kerbs cannot lower
+friction. Between two present materials, surface changes remain categorical at
+the source knot, with conservative adjacent-cell grip checks. Circular clearance
+and kerb contact both check neighboring side-edge segments through a shared
+spatial index; open entry and exit cross sections remain unwalled.
+
+CSV headers accept a UTF-8 BOM and case-insensitive column names, including
+spreadsheet-style `Width_Left`. Geometry failures retain the import context.
+Saved JSON omits empty kerb objects.

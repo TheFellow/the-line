@@ -48,6 +48,7 @@ func Load(path string) (scene Scene, err error) {
 	if err := dec.Decode(&extra); err != io.EOF {
 		return Scene{}, fmt.Errorf("load browser study: trailing data")
 	}
+	upgradeStudyDigests(&scene)
 	if _, err := SampleRoad(scene, 2); err != nil {
 		return Scene{}, err
 	}

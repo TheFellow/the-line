@@ -21,14 +21,14 @@ func ImportCSV(r io.Reader, name string) (Scene, error) {
 	if len(data) > 2<<20 {
 		return Scene{}, fmt.Errorf("import centreline: CSV exceeds 2 MiB")
 	}
-	reader := csv.NewReader(bytes.NewReader(data))
+	reader := csv.NewReader(bytes.NewReader(bytes.TrimPrefix(data, []byte{0xef, 0xbb, 0xbf})))
 	header, err := reader.Read()
 	if err != nil {
 		return Scene{}, fmt.Errorf("import centreline header: %w", err)
 	}
 	columns := map[string]int{}
 	for i, h := range header {
-		h = strings.TrimSpace(h)
+		h = strings.ToLower(strings.TrimSpace(h))
 		if _, exists := columns[h]; exists {
 			return Scene{}, fmt.Errorf("import centreline: duplicate column %q", h)
 		}
@@ -72,7 +72,7 @@ func ImportCSV(r io.Reader, name string) (Scene, error) {
 		}
 	}
 	if _, err := SampleRoad(scene, 2); err != nil {
-		return Scene{}, err
+		return Scene{}, fmt.Errorf("import centreline: %w", err)
 	}
 	return scene, nil
 }

@@ -11,6 +11,20 @@ type Kerb struct {
 	Grip    float64 `json:"grip,omitempty"`
 }
 
+// sampleKerb keeps surfaces categorical. A taper from an absent kerb uses
+// the material of the present end, never the absent end's default friction.
+func sampleKerb(a, b Kerb, blend float64) Kerb {
+	k := a
+	if blend == 1 || a.Width == 0 {
+		k = b
+	}
+	k.Width = a.Width + (b.Width-a.Width)*blend
+	if k.Width == 0 {
+		return Kerb{}
+	}
+	return k
+}
+
 func (k Kerb) Friction() float64 {
 	if k.Grip > 0 {
 		return k.Grip
@@ -104,6 +118,7 @@ func (s Sample) GripAcross(offset, radius float64) float64 {
 func Migrate(scene Scene) Scene {
 	scene.Points = append([]Point(nil), scene.Points...)
 	scene.Study = CloneStudy(scene.Study)
+	upgradeStudyDigests(&scene)
 	for i := range scene.Points {
 		p := &scene.Points[i]
 		p.WidthLeft, p.WidthRight = p.LeftWidth(), p.RightWidth()

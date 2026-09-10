@@ -25,8 +25,8 @@ type Point struct {
 	Width      float64 `json:"width,omitempty"` // Deprecated symmetric v1 width.
 	WidthLeft  float64 `json:"width_left,omitempty"`
 	WidthRight float64 `json:"width_right,omitempty"`
-	KerbLeft   Kerb    `json:"kerb_left,omitempty"`
-	KerbRight  Kerb    `json:"kerb_right,omitempty"`
+	KerbLeft   Kerb    `json:"kerb_left,omitzero"`
+	KerbRight  Kerb    `json:"kerb_right,omitzero"`
 	Bank       float64 `json:"bank"`
 	Surface    string  `json:"surface"`
 }
@@ -187,10 +187,13 @@ func SampleRoad(scene Scene, spacing float64) ([]Sample, error) {
 				cursor++
 			}
 			den := lengths[cursor] - lengths[cursor-1]
+			if !finite(den) || den <= 0 {
+				return nil, fmt.Errorf("track: segment %d has coincident arc-length samples", i)
+			}
 			t := (float64(cursor-1) + (target-lengths[cursor-1])/den) / float64(dense)
 			pos, der := curve(t)
 			horizontal := math.Hypot(der.X, der.Y)
-			if horizontal < 1e-6 {
+			if !finite(horizontal) || horizontal < 1e-6 {
 				return nil, fmt.Errorf("track: segment %d has a stationary tangent", i)
 			}
 			surface := p[i].Surface
@@ -207,12 +210,8 @@ func SampleRoad(scene Scene, spacing float64) ([]Sample, error) {
 			sample.WidthRight = p[i].RightWidth() + (p[i+1].RightWidth()-p[i].RightWidth())*blend
 			sample.Width = sample.WidthLeft + sample.WidthRight
 			sample.KerbsCountAsRoad = scene.KerbsCountAsRoad
-			sample.KerbLeft, sample.KerbRight = p[i].KerbLeft, p[i].KerbRight
-			if j == count {
-				sample.KerbLeft, sample.KerbRight = p[i+1].KerbLeft, p[i+1].KerbRight
-			}
-			sample.KerbLeft.Width = p[i].KerbLeft.Width + (p[i+1].KerbLeft.Width-p[i].KerbLeft.Width)*blend
-			sample.KerbRight.Width = p[i].KerbRight.Width + (p[i+1].KerbRight.Width-p[i].KerbRight.Width)*blend
+			sample.KerbLeft = sampleKerb(p[i].KerbLeft, p[i+1].KerbLeft, blend)
+			sample.KerbRight = sampleKerb(p[i].KerbRight, p[i+1].KerbRight, blend)
 			if len(out) > 0 {
 				last := out[len(out)-1]
 				sample.S = last.S + pos.Sub(last.Position).Length()
