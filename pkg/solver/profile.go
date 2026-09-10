@@ -6,6 +6,9 @@ import (
 )
 
 func (e evaluator) run(offset []float64) (Result, error) {
+	if err := e.cancelled(); err != nil {
+		return Result{}, err
+	}
 	path, err := e.geometry(offset)
 	if err != nil {
 		return Result{}, err
@@ -23,6 +26,11 @@ func (e evaluator) run(offset []float64) (Result, error) {
 	}
 	// Node limits include either adjacent segment's conservative road state.
 	for i := range speeds {
+		if i%32 == 0 {
+			if err := e.cancelled(); err != nil {
+				return Result{}, err
+			}
+		}
 		cap := e.model.Parameters().MaxSpeed
 		for j := max(0, i-1); j <= min(n-2, i); j++ {
 			feasible := func(v float64) bool {
@@ -61,8 +69,16 @@ func (e evaluator) run(offset []float64) (Result, error) {
 		resolutions[i] = 5
 	}
 	for pass := 0; pass < 40; pass++ {
+		if err := e.cancelled(); err != nil {
+			return Result{}, err
+		}
 		change := 0.
 		for i := 0; i < n-1; i++ {
+			if i%32 == 0 {
+				if err := e.cancelled(); err != nil {
+					return Result{}, err
+				}
+			}
 			ds := path[i+1].node.S - path[i].node.S
 			residual := func(v float64) float64 {
 				acc, _ := e.limits(path[i], path[i+1], grades[i], speeds[i], v, resolutions[i])
@@ -79,6 +95,11 @@ func (e evaluator) run(offset []float64) (Result, error) {
 			}
 		}
 		for i := n - 2; i >= 0; i-- {
+			if i%32 == 0 {
+				if err := e.cancelled(); err != nil {
+					return Result{}, err
+				}
+			}
 			ds := path[i+1].node.S - path[i].node.S
 			residual := func(v float64) float64 {
 				_, brake := e.limits(path[i], path[i+1], grades[i], v, speeds[i+1], resolutions[i])
@@ -118,6 +139,11 @@ func (e evaluator) run(offset []float64) (Result, error) {
 	t := 0.
 	residual := 0.
 	for i := range nodes {
+		if i%32 == 0 {
+			if err := e.cancelled(); err != nil {
+				return Result{}, err
+			}
+		}
 		nodes[i] = path[i].node
 		nodes[i].Speed = speeds[i]
 		nodes[i].Time = t

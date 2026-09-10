@@ -1,6 +1,7 @@
 package solver
 
 import (
+	"context"
 	"fmt"
 	"math"
 
@@ -14,6 +15,8 @@ type Options struct {
 	Spacing    float64
 	Iterations int
 	Margin     float64
+	// Seed contains lateral offsets at SampleRoad(scene, Spacing) stations.
+	Seed []float64
 }
 
 func DefaultOptions() Options { return Options{Spacing: 3, Iterations: 4, Margin: .25} }
@@ -31,10 +34,19 @@ type Node struct {
 	Curvature    float64 `json:"curvature"`
 	Offset       float64 `json:"offset"`
 	Acceleration float64 `json:"acceleration"`
+	// Force state uses the outgoing segment; the terminal node uses the final
+	// incoming segment. Grade is actual path rise/run; Grip is conservative.
+	Bank   float64            `json:"bank_deg"`
+	Grade  float64            `json:"grade"`
+	Grip   float64            `json:"grip"`
+	Forces vehicle.TyreForces `json:"tyre_forces"`
 }
 
 type Result struct {
+	model vehicle.Model
 	Nodes []Node `json:"nodes"`
+	// Offsets are lateral offsets on Road; use Spacing to evaluate them exactly.
+	Offsets []float64 `json:"offsets"`
 	// CenterNodes is the verified centreline trajectory under the same model,
 	// surfaces, clearance and requested endpoint caps as Nodes.
 	CenterNodes      []Node         `json:"center_nodes"`
@@ -59,6 +71,14 @@ type Result struct {
 // and headings free. Baseline and candidate share these conditions, but their
 // realized endpoint speeds can differ. Only feasible time improvements survive.
 func Solve(scene track.Scene, model vehicle.Model, opts Options) (Result, error) {
+	return SolveContext(context.Background(), scene, model, opts)
+}
+
+// SolveContext cancels between bounded numerical work units.
+func SolveContext(ctx context.Context, scene track.Scene, model vehicle.Model, opts Options) (Result, error) {
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
 	if model == nil {
 		return Result{}, fmt.Errorf("vehicle model is required")
 	}
@@ -67,6 +87,9 @@ func Solve(scene track.Scene, model vehicle.Model, opts Options) (Result, error)
 	}
 	if !finite(opts.Spacing) || opts.Spacing <= 0 || !finite(opts.Margin) || opts.Margin < 0 || opts.Iterations < 0 || opts.Iterations > 30 {
 		return Result{}, fmt.Errorf("spacing must be positive, margin nonnegative, and iterations between 0 and 30")
+	}
+	if opts.Seed != nil && opts.Iterations == 0 {
+		return EvaluateContext(ctx, scene, model, opts.Seed, opts)
 	}
 	road, err := track.SampleRoad(scene, opts.Spacing)
 	if err != nil {
@@ -84,7 +107,7 @@ func Solve(scene track.Scene, model vehicle.Model, opts Options) (Result, error)
 			return Result{}, fmt.Errorf("road at %.1f m is narrower than vehicle and clearance", s.S)
 		}
 	}
-	eval := evaluator{road: road, model: model, entry: scene.EntrySpeed, exit: scene.ExitSpeed, clearance: clearance}
+	eval := evaluator{ctx: ctx, road: road, model: model, entry: scene.EntrySpeed, exit: scene.ExitSpeed, clearance: clearance}
 	offsets := make([]float64, n)
 	best, err := eval.run(offsets)
 	if err != nil {
@@ -96,6 +119,23 @@ func Solve(scene track.Scene, model vehicle.Model, opts Options) (Result, error)
 	baseline := best
 	count := 1
 	var incumbents [][]float64
+	var seedResult *Result
+	if opts.Seed != nil {
+		r, err := EvaluateContext(ctx, scene, model, opts.Seed, opts)
+		if err != nil {
+			return Result{}, fmt.Errorf("seed: %w", err)
+		}
+		seedResult = &r
+		seeded, err := eval.run(opts.Seed)
+		if err != nil {
+			return Result{}, fmt.Errorf("seed: %w", err)
+		}
+		if seeded.Duration < best.Duration {
+			best = seeded
+			copy(offsets, opts.Seed)
+		}
+		incumbents = append(incumbents, append([]float64(nil), opts.Seed...))
+	}
 	accept := func(candidate []float64) bool {
 		count++
 		r, e := eval.run(candidate)
@@ -125,6 +165,9 @@ func Solve(scene track.Scene, model vehicle.Model, opts Options) (Result, error)
 	}
 	completed := 0
 	for iteration := 0; iteration < opts.Iterations; iteration++ {
+		if err := ctx.Err(); err != nil {
+			return Result{}, err
+		}
 		// Cosine bumps have zero derivative at their support edges. All candidates
 		// are evaluated through the complete sequence, including braking downstream.
 		for _, parts := range []int{4, 8, 16} {
@@ -165,6 +208,7 @@ func Solve(scene track.Scene, model vehicle.Model, opts Options) (Result, error)
 		}
 		count++
 		best = baseline
+		best.Offsets = make([]float64, len(fine))
 		// Coarse winners can exchange rank after curvature refinement. Retain a
 		// bounded, evenly spaced history so an optimistic late winner cannot
 		// discard an earlier physically faster line.
@@ -179,9 +223,19 @@ func Solve(scene track.Scene, model vehicle.Model, opts Options) (Result, error)
 			count++
 			if candidateErr == nil && candidate.Duration < best.Duration {
 				best = candidate
+				best.Offsets = candidateOffsets
 			}
 		}
 		road = fine
+	}
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
+	if seedResult != nil && seedResult.Duration < best.Duration {
+		best = *seedResult
+	}
+	if best.Offsets == nil {
+		best.Offsets = append([]float64(nil), offsets...)
 	}
 	best.CenterNodes = append([]Node(nil), baseline.Nodes...)
 	best.CenterDuration = baseline.Duration
@@ -207,6 +261,7 @@ type pathState struct {
 	bank, grip float64
 }
 type evaluator struct {
+	ctx                    context.Context
 	road                   []track.Sample
 	model                  vehicle.Model
 	entry, exit, clearance float64

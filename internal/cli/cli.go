@@ -30,6 +30,7 @@ Usage: the-line <command> [flags]
   new        Create a versioned track JSON file from a preset
   validate   Validate a track and its vehicle
   solve      Optimize a sequence; export JSON or CSV telemetry
+  sweep      Sweep a setup parameter on one fixed optimized line
   render     Render the studio to a PNG without a display
   animate    Render a timed animated GIF without a display
 
@@ -60,6 +61,9 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	command := args[0]
+	if command == "sweep" {
+		return runSweep(args[1:], stdout, stderr)
+	}
 	if command == "presets" {
 		if len(args) > 1 {
 			return errors.New("presets takes no arguments")
@@ -126,6 +130,10 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	config, err := readVehicle(a, scene.Vehicle)
+	if a.vehicleFile == "" && a.vehicle == "" && scene.VehicleConfig != nil {
+		config = *scene.VehicleConfig
+		err = config.Validate()
+	}
 	if err != nil {
 		return err
 	}
@@ -230,6 +238,7 @@ func readScene(a arguments) (track.Scene, error) {
 	return track.Preset(a.preset)
 }
 func readVehicle(a arguments, name string) (vehicle.Config, error) {
+
 	if a.vehicleFile != "" {
 		var v vehicle.Config
 		file, err := os.Open(a.vehicleFile)
