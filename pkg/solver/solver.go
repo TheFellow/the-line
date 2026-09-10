@@ -17,6 +17,12 @@ type Options struct {
 	Margin     float64
 	// Seed contains lateral offsets at SampleRoad(scene, Spacing) stations.
 	Seed []float64
+	// Workers bounds independent fine-candidate evaluations (0: up to four).
+	// Browser builds and replacement models always evaluate sequentially.
+	Workers int
+	// Polish adds 0–3 bounded smaller-amplitude local sweeps. Zero preserves
+	// the established search sequence and its recorded fixture results.
+	Polish int
 }
 
 func DefaultOptions() Options { return Options{Spacing: 3, Iterations: 4, Margin: .25} }
@@ -44,8 +50,15 @@ type Node struct {
 
 type Result struct {
 	Closed bool `json:"closed,omitempty"`
-	model  vehicle.Model
-	Nodes  []Node `json:"nodes"`
+	// RefinementDifference is signed percent change of the selected line from
+	// coarse to fine evaluation; a measured agreement, not a probability.
+	RefinementDifference   float64 `json:"refinement_difference_percent"`
+	SelectedCoarseDuration float64 `json:"selected_coarse_duration"`
+	FineCandidates         int     `json:"fine_candidates"`
+	SearchWorkers          int     `json:"search_workers"`
+	PolishCandidates       int     `json:"polish_candidates"`
+	model                  vehicle.Model
+	Nodes                  []Node `json:"nodes"`
 	// Offsets are lateral offsets on Road; use Spacing to evaluate them exactly.
 	Offsets []float64 `json:"offsets"`
 	// CenterNodes is the verified centreline trajectory under the same model,
@@ -90,7 +103,10 @@ func SolveContext(ctx context.Context, scene track.Scene, model vehicle.Model, o
 	if !finite(opts.Spacing) || opts.Spacing <= 0 || !finite(opts.Margin) || opts.Margin < 0 || opts.Iterations < 0 || opts.Iterations > 30 {
 		return Result{}, fmt.Errorf("spacing must be positive, margin nonnegative, and iterations between 0 and 30")
 	}
-	if opts.Seed != nil && opts.Iterations == 0 {
+	if opts.Workers < 0 || opts.Workers > 32 || opts.Polish < 0 || opts.Polish > 3 {
+		return Result{}, fmt.Errorf("workers must be between 0 and 32 and polish between 0 and 3")
+	}
+	if opts.Seed != nil && opts.Iterations == 0 && opts.Polish == 0 {
 		return EvaluateContext(ctx, scene, model, opts.Seed, opts)
 	}
 	road, err := track.SampleRoad(scene, opts.Spacing)
@@ -123,7 +139,9 @@ func SolveContext(ctx context.Context, scene track.Scene, model vehicle.Model, o
 	baseline := best
 	count := 1
 	var incumbents [][]float64
+	var incumbentDurations []float64
 	var seedResult *Result
+	var seedCoarseDuration float64
 	if opts.Seed != nil {
 		r, err := EvaluateContext(ctx, scene, model, opts.Seed, opts)
 		if err != nil {
@@ -134,11 +152,13 @@ func SolveContext(ctx context.Context, scene track.Scene, model vehicle.Model, o
 		if err != nil {
 			return Result{}, fmt.Errorf("seed: %w", err)
 		}
+		seedCoarseDuration = seeded.Duration
 		if seeded.Duration < best.Duration {
 			best = seeded
 			copy(offsets, opts.Seed)
 		}
 		incumbents = append(incumbents, append([]float64(nil), opts.Seed...))
+		incumbentDurations = append(incumbentDurations, seeded.Duration)
 	}
 	accept := func(candidate []float64) bool {
 		count++
@@ -147,6 +167,7 @@ func SolveContext(ctx context.Context, scene track.Scene, model vehicle.Model, o
 			best = r
 			copy(offsets, candidate)
 			incumbents = append(incumbents, append([]float64(nil), candidate...))
+			incumbentDurations = append(incumbentDurations, r.Duration)
 			return true
 		}
 		return false
@@ -209,7 +230,39 @@ func SolveContext(ctx context.Context, scene track.Scene, model vehicle.Model, o
 		completed++
 		// A smaller next sweep can improve even when the current amplitude cannot.
 	}
+	polishCandidates := 0
+	prePolishIncumbents := len(incumbents)
+	for sweep := 0; sweep < opts.Polish; sweep++ {
+		for j := 0; j <= 16; j++ {
+			if err := ctx.Err(); err != nil {
+				return Result{}, err
+			}
+			center := float64(j) * road[n-1].S / 16
+			radius := road[n-1].S / 16 * 1.35
+			for _, sign := range []float64{-1, 1} {
+				candidate := append([]float64(nil), offsets...)
+				for i := range candidate {
+					delta := math.Abs(road[i].S - center)
+					if scene.Closed {
+						delta = math.Min(delta, road[n-1].S-delta)
+					}
+					if u := delta / radius; u < 1 {
+						latent := math.Atanh(clamp((candidate[i]-centers[i])/bounds[i], -.999, .999))
+						candidate[i] = centers[i] + bounds[i]*math.Tanh(latent+sign*.08*math.Pow(.5, float64(sweep))*(1+math.Cos(math.Pi*u))/2)
+					}
+				}
+				if scene.Closed {
+					candidate[n-1] = candidate[0]
+				}
+				accept(candidate)
+				polishCandidates++
+			}
+		}
+	}
+	coarseBaselineDuration := baseline.Duration
 	coarseDuration := best.Duration
+	selectedCoarseDuration := best.Duration
+	fineCandidates := 0
 	// Search geometry is provisional. Export and compare on a denser road, so
 	// coarse curvature samples cannot produce an optimistic displayed trajectory.
 	finalSpacing := math.Min(opts.Spacing, .5)
@@ -225,25 +278,34 @@ func SolveContext(ctx context.Context, scene track.Scene, model vehicle.Model, o
 			return Result{}, fmt.Errorf("refined centreline infeasible: %w", err)
 		}
 		count++
+		selectedCoarseDuration = coarseBaselineDuration
 		best = baseline
 		best.Offsets = make([]float64, len(fine))
 		// Coarse winners can exchange rank after curvature refinement. Retain a
 		// bounded, evenly spaced history so an optimistic late winner cannot
 		// discard an earlier physically faster line.
-		checks := min(16, len(incumbents))
-		for j := 0; j < checks; j++ {
-			index := 0
-			if checks > 1 {
-				index = j * (len(incumbents) - 1) / (checks - 1)
-			}
-			candidateOffsets := interpolateOffsets(road, incumbents[index], fine, clearance)
-			candidate, candidateErr := refined.run(candidateOffsets)
+		indices := shortlistIndices(prePolishIncumbents, 16)
+		// Preserve every unpolished finalist. A polish cannot discard a
+		// previously faster fine result merely by changing shortlist spacing.
+		for _, index := range shortlistIndices(len(incumbents)-prePolishIncumbents, 4) {
+			indices = append(indices, prePolishIncumbents+index)
+		}
+		checks := len(indices)
+		fineOffsets := make([][]float64, checks)
+		coarseTimes := make([]float64, checks)
+		for j, index := range indices {
+			fineOffsets[j] = interpolateOffsets(road, incumbents[index], fine, clearance)
+			coarseTimes[j] = incumbentDurations[index]
+		}
+		for j, evaluation := range evaluateCandidates(ctx, refined, fineOffsets, opts.Workers) {
 			count++
-			if candidateErr == nil && candidate.Duration < best.Duration {
-				best = candidate
-				best.Offsets = candidateOffsets
+			if evaluation.err == nil && len(evaluation.result.Nodes) > 0 && evaluation.result.Duration < best.Duration {
+				best = evaluation.result
+				best.Offsets = fineOffsets[j]
+				selectedCoarseDuration = coarseTimes[j]
 			}
 		}
+		fineCandidates = checks
 		road = fine
 	}
 	if err := ctx.Err(); err != nil {
@@ -251,6 +313,7 @@ func SolveContext(ctx context.Context, scene track.Scene, model vehicle.Model, o
 	}
 	if seedResult != nil && seedResult.Duration < best.Duration {
 		best = *seedResult
+		selectedCoarseDuration = seedCoarseDuration
 	}
 	if best.Offsets == nil {
 		best.Offsets = append([]float64(nil), offsets...)
@@ -265,11 +328,19 @@ func SolveContext(ctx context.Context, scene track.Scene, model vehicle.Model, o
 	best.Spacing = finalSpacing
 	best.SearchSpacing = opts.Spacing
 	best.CoarseDuration = coarseDuration
+	best.SelectedCoarseDuration = selectedCoarseDuration
+	best.RefinementDifference = 100 * (best.Duration - selectedCoarseDuration) / best.Duration
+	best.FineCandidates = fineCandidates
+	best.SearchWorkers = searchWorkers(model, opts.Workers, fineCandidates)
+	best.PolishCandidates = polishCandidates
 	best.EntrySpeedCap = scene.EntrySpeed
 	best.ExitSpeedCap = scene.ExitSpeed
 	best.Termination = "search budget exhausted"
 	if completed < opts.Iterations || opts.Iterations == 0 {
 		best.Termination = "no improving smooth offset found"
+	}
+	if opts.Polish > 0 {
+		best.Termination += "; local polish budget exhausted"
 	}
 	return best, nil
 }

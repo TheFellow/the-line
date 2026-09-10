@@ -74,13 +74,24 @@ func EvaluateContext(ctx context.Context, scene track.Scene, model vehicle.Model
 	if err != nil {
 		return Result{}, err
 	}
-	baseline, err := eval.run(make([]float64, len(road)))
-	if err != nil {
-		return Result{}, fmt.Errorf("centreline infeasible: %w", err)
+	baseline := result
+	isCenter := true
+	for _, offset := range offsets {
+		if offset != 0 {
+			isCenter = false
+			break
+		}
 	}
+	if !isCenter {
+		baseline, err = eval.run(make([]float64, len(road)))
+		if err != nil {
+			return Result{}, fmt.Errorf("centreline infeasible: %w", err)
+		}
+	}
+
 	result.Offsets = append([]float64(nil), offsets...)
 	result.Road = road
-	result.CenterNodes = baseline.Nodes
+	result.CenterNodes = append([]Node(nil), baseline.Nodes...)
 	result.CenterDuration = baseline.Duration
 	result.CenterEntrySpeed = baseline.Nodes[0].Speed
 	result.CenterExitSpeed = baseline.Nodes[len(baseline.Nodes)-1].Speed
@@ -89,8 +100,13 @@ func EvaluateContext(ctx context.Context, scene track.Scene, model vehicle.Model
 	result.Spacing = spacing
 	result.SearchSpacing = opts.Spacing
 	result.CoarseDuration = result.Duration
+	result.SelectedCoarseDuration = result.Duration
+	result.SearchWorkers = 1
 	result.Termination = "supplied line evaluated; no search"
 	result.Candidates = 2
+	if isCenter {
+		result.Candidates = 1
+	}
 	return result, nil
 }
 

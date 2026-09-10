@@ -3,6 +3,8 @@ package solver
 import (
 	"fmt"
 	"math"
+
+	"github.com/TheFellow/the-line/pkg/vehicle"
 )
 
 func (e evaluator) run(offset []float64) (Result, error) {
@@ -24,6 +26,21 @@ func (e evaluator) run(offset []float64) (Result, error) {
 		}
 		grades[i] = (b.Z - a.Z) / h
 	}
+	var config *vehicle.Config
+	switch model := e.model.(type) {
+	case vehicle.Config:
+		config = &model
+	case *vehicle.Config:
+		config = model
+	}
+	segments := borrowEnvelopes(n - 1)
+	defer releaseEnvelopes(segments)
+	for i := range segments {
+		segments[i].model, segments[i].config = e.model, config
+		segments[i].a, segments[i].b, segments[i].grade = path[i], path[i+1], grades[i]
+		segments[i].ready = [65]bool{}
+	}
+	maxSpeed := e.model.Parameters().MaxSpeed
 	// Node limits include either adjacent segment's conservative road state.
 	for i := range speeds {
 		if i%32 == 0 {
@@ -31,13 +48,19 @@ func (e evaluator) run(offset []float64) (Result, error) {
 				return Result{}, err
 			}
 		}
-		cap := e.model.Parameters().MaxSpeed
+		cap := maxSpeed
 		for j := max(0, i-1); j <= min(n-2, i); j++ {
 			feasible := func(v float64) bool {
 				a, b := path[j], path[j+1]
 				grip := math.Min(a.grip, b.grip)
-				for _, p := range []pathState{a, b} {
-					if !e.model.Limits(v, p.node.Curvature, p.bank, grades[j], grip).Feasible {
+				for endpoint, p := range []pathState{a, b} {
+					ok := false
+					if config != nil {
+						ok = config.FeasibleOn(v, segments[j].state(endpoint*64))
+					} else {
+						ok = e.model.Limits(v, p.node.Curvature, p.bank, grades[j], grip).Feasible
+					}
+					if !ok {
 						return false
 					}
 				}
@@ -69,6 +92,7 @@ func (e evaluator) run(offset []float64) (Result, error) {
 		speeds[n-1] = math.Min(speeds[n-1], e.exit)
 	}
 	converged := false
+	denseDrive, denseBrake := make([]float64, n-1), make([]float64, n-1)
 	resolutions := make([]int, n-1)
 	for i := range resolutions {
 		resolutions[i] = 5
@@ -86,7 +110,7 @@ func (e evaluator) run(offset []float64) (Result, error) {
 			}
 			ds := path[i+1].node.S - path[i].node.S
 			residual := func(v float64) float64 {
-				acc, _ := e.limits(path[i], path[i+1], grades[i], speeds[i], v, resolutions[i])
+				acc, _ := segments[i].limits(speeds[i], v, resolutions[i])
 				return (v*v-speeds[i]*speeds[i])/(2*ds) - acc
 			}
 			if residual(speeds[i+1]) > 1e-8 {
@@ -113,7 +137,7 @@ func (e evaluator) run(offset []float64) (Result, error) {
 			}
 			ds := path[i+1].node.S - path[i].node.S
 			residual := func(v float64) float64 {
-				_, brake := e.limits(path[i], path[i+1], grades[i], v, speeds[i+1], resolutions[i])
+				_, brake := segments[i].limits(v, speeds[i+1], resolutions[i])
 				return (v*v-speeds[i+1]*speeds[i+1])/(2*ds) - brake
 			}
 			if residual(speeds[i]) > 1e-8 {
@@ -135,9 +159,15 @@ func (e evaluator) run(offset []float64) (Result, error) {
 		if change < 1e-6 {
 			refine := false
 			for i := range resolutions {
+				if i%32 == 0 {
+					if err := e.cancelled(); err != nil {
+						return Result{}, err
+					}
+				}
 				ds := path[i+1].node.S - path[i].node.S
 				a := (speeds[i+1]*speeds[i+1] - speeds[i]*speeds[i]) / (2 * ds)
-				drive, brake := e.limits(path[i], path[i+1], grades[i], speeds[i], speeds[i+1], 65)
+				drive, brake := segments[i].limits(speeds[i], speeds[i+1], 65)
+				denseDrive[i], denseBrake[i] = drive, brake
 				if math.Max(a-drive, -a-brake) > 1e-6 && resolutions[i] < 65 {
 					resolutions[i] = 65
 					refine = true
@@ -174,8 +204,10 @@ func (e evaluator) run(offset []float64) (Result, error) {
 		}
 		a := (speeds[i+1]*speeds[i+1] - speeds[i]*speeds[i]) / (2 * ds)
 		nodes[i].Acceleration = a
-		// Denser independent post-check rejects candidates exploiting sampling.
-		drive, brake := e.limits(path[i], path[i+1], grades[i], speeds[i], speeds[i+1], 65)
+		// The convergence gate evaluated all 65 points at these exact final
+		// speeds. Reuse those bounds; the independent verification suite uses
+		// its own denser samples and separately reconstructed force balance.
+		drive, brake := denseDrive[i], denseBrake[i]
 		r := math.Max(a-drive, -a-brake)
 		residual = math.Max(residual, r)
 		if r > 2e-5 || !finite(r) {

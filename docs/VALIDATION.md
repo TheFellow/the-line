@@ -130,3 +130,54 @@ visible, the independent pinned ghost and same-station traces agree, and the
 centreline manual run remains visibly slower than the pinned optimized esses run
 (15.85 versus 14.24 seconds in this fixture). These screenshots establish
 presentation, not calibration against a real vehicle.
+
+## Iteration 8: deterministic search performance, 2026-09-10
+
+Profiled the full default road-car esses solve before changes with
+`go test ./pkg/solver -run '^$' -bench BenchmarkSolveEsses -benchtime=1x -cpuprofile artifacts/iteration8-before.cpu`.
+On this Intel Core i5-1038NG7 / Go 1.24 / darwin-amd64 workspace, the initial
+single-run result was **4.246 s**, 67.90 MB allocated. The profile attributed
+68.5% of sampled CPU to segment envelope work, including repeated trigonometry
+and copies of the force-instrumentation payload.
+
+The final benchmark command was
+`go test ./pkg/solver -run '^$' -bench 'Benchmark(Solve|Evaluate).*Esses' -benchtime=1x -cpuprofile artifacts/iteration8-final.cpu`.
+No other test/solve processes ran during that final measurement:
+
+| Case | Final elapsed time | Allocated bytes |
+| --- | ---: | ---: |
+| Full default road-car esses search | 1.564 s | 111.22 MB |
+| Centreline Evaluate, cold cache | 41.42 ms | 9.17 MB |
+| Full richer-model esses search | 45.269 s | 103.05 MB |
+
+The legacy full solve was **2.71× faster** in this before/after single-run
+comparison. Cached road projections trade extra allocation for fewer repeated
+calculations; a bounded worker pool and reusable segment storage limit retained
+scratch space. These measurements are workload timings, not GUI frame rates or
+a general benchmark guarantee. Rich-model timing uses front brake .6, CG .35 m,
+wheelbase 2.8 m, load sensitivity .12, lift area 3 m² and aero balance .45. It
+remains substantially more expensive than the legacy envelope. The **16 ms
+provisional-evaluation target is not met**; evaluation/search remain asynchronous
+and cancellable. Earlier rich timing taken under contention is not used to claim
+a precise speedup.
+
+`TestSearchWorkersPreserveFixtureTrajectories` compared every optimized and
+centreline node, every offset, duration and candidate count against sequential
+unprepared `Model.Limits` evaluation at the full default search budget. All five
+legacy fixtures were bit-for-bit identical: hairpin 12.784581926891 s, esses
+14.240646502058 s, compound 13.499439525622 s, banked 10.090487994429 s and rally
+21.453428463520 s. A bounded optional polish after one esses coordinate sweep
+improved 14.441873790 s to 14.352392221 s; its shortlist preserves every original
+finalist and retains seed/centreline fallback.
+
+`go test ./pkg/solver ./internal/verification -count=1` passed (71.12 s and
+67.13 s when run together). The independent matrix includes the richer axle
+force reconstruction. `go test ./pkg/vehicle -count=1` passed prepared/public
+envelope equivalence over speed, bank, grade, grip and optional setups, existing
+analytic launch/braking/downforce oracles, unchanged legacy-default bits and
+positive-base power-law equivalence. `go test -race ./pkg/solver -run
+'TestIndependentFinalistsWorkerDeterminism|TestSearchCancellation' -count=1`
+passed. Final verification still uses all 65 envelope samples (one equivalent
+evaluation on exactly constant segments), with separate denser independent
+checks. New diagnostics describe **measured coarse-to-fine agreement**, never a
+probabilistic optimizer confidence. See [SEARCH.md](SEARCH.md) for contracts.

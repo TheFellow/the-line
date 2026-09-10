@@ -32,8 +32,8 @@ func (s axleState) capacities(longitudinal float64) (front, rear float64) {
 	}
 	front, rear = s.mu*f, s.mu*r
 	if c.LoadSensitivity > 0 {
-		front *= math.Pow(f/(Gravity*c.FrontWeight), -c.LoadSensitivity)
-		rear *= math.Pow(r/(Gravity*(1-c.FrontWeight)), -c.LoadSensitivity)
+		front *= loadScale(f/(Gravity*c.FrontWeight), c.LoadSensitivity)
+		rear *= loadScale(r/(Gravity*(1-c.FrontWeight)), c.LoadSensitivity)
 	}
 	return front, rear
 }
@@ -219,7 +219,7 @@ func (s axleState) gapDerivative(force, lateral, sign float64) (float64, float64
 	cf, cr := s.mu*nf, s.mu*nr
 	df, dr := -sign*h*s.mu, sign*h*s.mu
 	if c.LoadSensitivity > 0 {
-		sf, sr := math.Pow(nf/(Gravity*c.FrontWeight), -c.LoadSensitivity), math.Pow(nr/(Gravity*(1-c.FrontWeight)), -c.LoadSensitivity)
+		sf, sr := loadScale(nf/(Gravity*c.FrontWeight), c.LoadSensitivity), loadScale(nr/(Gravity*(1-c.FrontWeight)), c.LoadSensitivity)
 		cf *= sf
 		cr *= sr
 		df *= sf * (1 - c.LoadSensitivity)
@@ -242,4 +242,11 @@ func (s axleState) gapDerivative(force, lateral, sign float64) (float64, float64
 		return front - cf, q*q*force/front - df
 	}
 	return rear - cr, (1-q)*(1-q)*force/rear - dr
+}
+
+// Loads are strictly positive and the sensitivity exponent is in (0, .5].
+// Exp/Log implements the same power law without math.Pow's general signed,
+// integer-exponent and infinite-input branches in this hot Newton iteration.
+func loadScale(relativeLoad, sensitivity float64) float64 {
+	return math.Exp(-sensitivity * math.Log(relativeLoad))
 }
