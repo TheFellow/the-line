@@ -1,0 +1,234 @@
+package solver
+
+import (
+	"fmt"
+	"math"
+
+	"github.com/TheFellow/the-line/pkg/track"
+	"github.com/TheFellow/the-line/pkg/vehicle"
+)
+
+// Options controls sampling and the finite search budget. Margin is additional
+// horizontal clearance beyond half the vehicle width (a circular approximation).
+type Options struct {
+	Spacing    float64
+	Iterations int
+	Margin     float64
+}
+
+func DefaultOptions() Options { return Options{Spacing: 3, Iterations: 4, Margin: .25} }
+
+type Node struct {
+	Position     track.Vec3 `json:"position"`
+	S            float64    `json:"s"`
+	Time         float64    `json:"time"`
+	Speed        float64    `json:"speed"`
+	Curvature    float64    `json:"curvature"`
+	Offset       float64    `json:"offset"`
+	Acceleration float64    `json:"acceleration"`
+}
+
+type Result struct {
+	Nodes            []Node         `json:"nodes"`
+	Road             []track.Sample `json:"-"`
+	Duration         float64        `json:"duration"`
+	CenterDuration   float64        `json:"center_duration"`
+	Length           float64        `json:"length"`
+	Iterations       int            `json:"iterations"`
+	Candidates       int            `json:"candidates"`
+	Spacing          float64        `json:"spacing"`
+	SearchSpacing    float64        `json:"search_spacing"`
+	CoarseDuration   float64        `json:"coarse_duration"`
+	EntrySpeedCap    float64        `json:"entry_speed_cap"`
+	ExitSpeedCap     float64        `json:"exit_speed_cap"`
+	CenterEntrySpeed float64        `json:"center_entry_speed"`
+	CenterExitSpeed  float64        `json:"center_exit_speed"`
+	Termination      string         `json:"termination"`
+	MaxForceResidual float64        `json:"max_force_residual"`
+}
+
+// At interpolates the validated piecewise-linear path with constant segment
+// acceleration. Open paths clamp at their endpoints; wrapping is a UI decision.
+func (r Result) At(t float64) Node {
+	if len(r.Nodes) == 0 {
+		return Node{}
+	}
+	if t <= 0 {
+		return r.Nodes[0]
+	}
+	last := r.Nodes[len(r.Nodes)-1]
+	if t >= last.Time {
+		return last
+	}
+	lo, hi := 0, len(r.Nodes)-1
+	for lo+1 < hi {
+		mid := (lo + hi) / 2
+		if r.Nodes[mid].Time <= t {
+			lo = mid
+		} else {
+			hi = mid
+		}
+	}
+	a, b := r.Nodes[lo], r.Nodes[hi]
+	dt := t - a.Time
+	ds := b.S - a.S
+	f := (a.Speed*dt + .5*a.Acceleration*dt*dt) / ds
+	f = clamp(f, 0, 1)
+	return Node{Position: mix(a.Position, b.Position, f), S: a.S + f*ds, Time: t, Speed: math.Max(0, a.Speed+a.Acceleration*dt), Curvature: lerp(a.Curvature, b.Curvature, f), Offset: lerp(a.Offset, b.Offset, f), Acceleration: a.Acceleration}
+}
+
+// Solve treats entry/exit speeds as upper bounds and leaves endpoint offsets
+// and headings free. Baseline and candidate share these conditions, but their
+// realized endpoint speeds can differ. Only feasible time improvements survive.
+func Solve(scene track.Scene, model vehicle.Model, opts Options) (Result, error) {
+	if model == nil {
+		return Result{}, fmt.Errorf("vehicle model is required")
+	}
+	if err := model.Parameters().Validate(); err != nil {
+		return Result{}, err
+	}
+	if !finite(opts.Spacing) || opts.Spacing <= 0 || !finite(opts.Margin) || opts.Margin < 0 || opts.Iterations < 0 || opts.Iterations > 30 {
+		return Result{}, fmt.Errorf("spacing must be positive, margin nonnegative, and iterations between 0 and 30")
+	}
+	road, err := track.SampleRoad(scene, opts.Spacing)
+	if err != nil {
+		return Result{}, err
+	}
+	n := len(road)
+	if n < 3 {
+		return Result{}, fmt.Errorf("road requires at least three samples; reduce spacing")
+	}
+	clearance := model.Parameters().Width/2 + opts.Margin
+	bounds := make([]float64, n)
+	for i, s := range road {
+		bounds[i] = s.Width/2 - clearance
+		if bounds[i] <= 0 {
+			return Result{}, fmt.Errorf("road at %.1f m is narrower than vehicle and clearance", s.S)
+		}
+	}
+	eval := evaluator{road: road, model: model, entry: scene.EntrySpeed, exit: scene.ExitSpeed, clearance: clearance}
+	offsets := make([]float64, n)
+	best, err := eval.run(offsets)
+	if err != nil {
+		return Result{}, fmt.Errorf("centreline infeasible: %w", err)
+	}
+	best.CenterDuration = best.Duration
+	best.CenterEntrySpeed = best.Nodes[0].Speed
+	best.CenterExitSpeed = best.Nodes[len(best.Nodes)-1].Speed
+	baseline := best
+	count := 1
+	var incumbents [][]float64
+	accept := func(candidate []float64) bool {
+		count++
+		r, e := eval.run(candidate)
+		if e == nil && r.Duration < best.Duration-1e-7 {
+			best = r
+			copy(offsets, candidate)
+			incumbents = append(incumbents, append([]float64(nil), candidate...))
+			return true
+		}
+		return false
+	}
+	// A bounded geometric fairing seed gives coordinated corner-entry/exit moves.
+	seed := append([]float64(nil), offsets...)
+	for k := 0; k < 80; k++ {
+		next := append([]float64(nil), seed...)
+		for i := 1; i < n-1; i++ {
+			p := road[i].AtOffset(seed[i])
+			a := road[i-1].AtOffset(seed[i-1])
+			b := road[i+1].AtOffset(seed[i+1])
+			d := (.5*(a.X+b.X)-p.X)*road[i].Normal.X + (.5*(a.Y+b.Y)-p.Y)*road[i].Normal.Y
+			next[i] = clamp(seed[i]+.65*d, -.9*bounds[i], .9*bounds[i])
+		}
+		seed = next
+	}
+	if opts.Iterations > 0 {
+		accept(seed)
+	}
+	completed := 0
+	for iteration := 0; iteration < opts.Iterations; iteration++ {
+		// Cosine bumps have zero derivative at their support edges. All candidates
+		// are evaluated through the complete sequence, including braking downstream.
+		for _, parts := range []int{4, 8, 16} {
+			radius := road[n-1].S / float64(parts) * 1.35
+			amp := math.Pow(.62, float64(iteration))
+			for j := 0; j <= parts; j++ {
+				center := float64(j) * road[n-1].S / float64(parts)
+				for _, sign := range []float64{-1, 1} {
+					candidate := append([]float64(nil), offsets...)
+					for i := range candidate {
+						u := math.Abs(road[i].S-center) / radius
+						if u < 1 {
+							latent := math.Atanh(clamp(candidate[i]/bounds[i], -.999, .999))
+							candidate[i] = bounds[i] * math.Tanh(latent+sign*amp*(1+math.Cos(math.Pi*u))/2)
+						}
+					}
+					accept(candidate)
+				}
+			}
+		}
+		completed++
+		// A smaller next sweep can improve even when the current amplitude cannot.
+	}
+	coarseDuration := best.Duration
+	// Search geometry is provisional. Export and compare on a denser road, so
+	// coarse curvature samples cannot produce an optimistic displayed trajectory.
+	finalSpacing := math.Min(opts.Spacing, .5)
+	if finalSpacing < opts.Spacing {
+		fine, err := track.SampleRoad(scene, finalSpacing)
+		if err != nil {
+			return Result{}, err
+		}
+		refined := eval
+		refined.road = fine
+		baseline, err = refined.run(make([]float64, len(fine)))
+		if err != nil {
+			return Result{}, fmt.Errorf("refined centreline infeasible: %w", err)
+		}
+		count++
+		best = baseline
+		// Coarse winners can exchange rank after curvature refinement. Retain a
+		// bounded, evenly spaced history so an optimistic late winner cannot
+		// discard an earlier physically faster line.
+		checks := min(16, len(incumbents))
+		for j := 0; j < checks; j++ {
+			index := 0
+			if checks > 1 {
+				index = j * (len(incumbents) - 1) / (checks - 1)
+			}
+			candidateOffsets := interpolateOffsets(road, incumbents[index], fine, clearance)
+			candidate, candidateErr := refined.run(candidateOffsets)
+			count++
+			if candidateErr == nil && candidate.Duration < best.Duration {
+				best = candidate
+			}
+		}
+		road = fine
+	}
+	best.CenterDuration = baseline.Duration
+	best.CenterEntrySpeed = baseline.Nodes[0].Speed
+	best.CenterExitSpeed = baseline.Nodes[len(baseline.Nodes)-1].Speed
+	best.Road = road
+	best.Candidates = count
+	best.Iterations = completed
+	best.Spacing = finalSpacing
+	best.SearchSpacing = opts.Spacing
+	best.CoarseDuration = coarseDuration
+	best.EntrySpeedCap = scene.EntrySpeed
+	best.ExitSpeedCap = scene.ExitSpeed
+	best.Termination = "search budget exhausted"
+	if completed < opts.Iterations || opts.Iterations == 0 {
+		best.Termination = "no improving smooth offset found"
+	}
+	return best, nil
+}
+
+type pathState struct {
+	node       Node
+	bank, grip float64
+}
+type evaluator struct {
+	road                   []track.Sample
+	model                  vehicle.Model
+	entry, exit, clearance float64
+}
