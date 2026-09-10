@@ -116,6 +116,30 @@ func (e *Editor) Redo() bool {
 }
 func (e *Editor) CanUndo() bool { return len(e.undo) > 0 }
 func (e *Editor) CanRedo() bool { return len(e.redo) > 0 }
+
+// Checkpoint captures the scene, selection, and undo/redo history. Call the
+// returned function to discard provisional edits after an asynchronous operation
+// fails. Restoring does not add an undo entry, and the checkpoint can be reused.
+// Capture and restoration must run on the editor's owning goroutine.
+func (e *Editor) Checkpoint() func() {
+	saved := e.copyState()
+	return func() { *e = saved.copyState() }
+}
+
+func (e *Editor) copyState() Editor {
+	copySnapshot := func(s snapshot) snapshot {
+		return snapshot{scene: clone(s.scene), selected: s.selected}
+	}
+	copyHistory := func(history []snapshot) []snapshot {
+		out := make([]snapshot, len(history))
+		for i, s := range history {
+			out[i] = copySnapshot(s)
+		}
+		return out
+	}
+	return Editor{current: copySnapshot(e.current), undo: copyHistory(e.undo), redo: copyHistory(e.redo)}
+}
+
 func (e *Editor) Load(path string) error {
 	s, err := track.Load(path)
 	if err != nil {
