@@ -292,3 +292,49 @@ The complete `make verify-headless` run passed all **86 workflow checks**:
 `artifacts/browser/report.json` has no failed cases or browser errors. Both final
 racecraft captures were inspected. This exercises the actual Ebitengine renderer
 and real mouse/keyboard input without opening desktop windows.
+
+## Independent racecraft critique follow-up (2026-09-10)
+
+The [research brief](../research/RACECRAFT_IMPLEMENTATION.md) was reviewed against
+source through the Claude CLI. Its [verbatim critique](../research/CLAUDE_RACECRAFT_CRITIQUE.md)
+and [finding-by-finding response](../research/RACECRAFT_CRITIQUE_RESPONSE.md) record
+what was inspected, what was reproduced, and how fresh implementation agents
+addressed the findings in focused commits.
+
+After the fixes, `go test ./...`, `go vet ./...` and `make build` passed. A
+`CGO_ENABLED=0` CLI build exported pass/repass CSV. Added tests cover zero and
+fractional entry caps, meaningful failure causes, road-distance placements on
+nonuniform geometry, all three vehicle presets on a custom banked road,
+first-finish behavior, the certified lower-bound property, analytic pass/repass
+thresholds, tangent contact, interval-budget exhaustion and failed/aliased exports.
+The cap and station-placement regressions were checked against the old code and
+failed for their intended reasons.
+
+The final actual Ebitengine browser runs passed **26 workflow checks** with no
+browser errors: **20 racecraft** checks and **six authoring** checks across
+1000×700 / DPR 2 and 1440×900 / DPR 1. They cover ordinary controls and save/load,
+failed-load and failed-plan preservation, held gesture cancellation, perspective
+return, delayed CSV reads across mode boundaries, custom example replacement,
+cancelling a pending plan, startup flag interactions, normal CSV import, rejected
+imports and undo/redo preservation. Reports are retained at:
+
+- `artifacts/browser-racecraft-review-final/report.json`
+- `artifacts/browser-authoring-review-final/report.json`
+
+The final elevated pass/repass, plan over-under and both CSV import captures were
+inspected. These post-review runs target the modified workflows; the 86-check
+full pre-review baseline above remains separate evidence.
+
+The README animation was regenerated with `go run ./tools/preview`, decoded and
+visually inspected across all three clips: **391 frames, 960×600, 1,601,432 bytes**.
+Both standalone PNG views were inspected, including 6.25 m separation precision.
+The corrected station mapping retains the intended pass/repass outcomes but
+changes timing; current measurements and the 11 m no-pass gap fixture are in
+[RACECRAFT.md](RACECRAFT.md).
+
+Reproduce the focused browser checks without desktop windows:
+
+```sh
+node tools/browser/verify.mjs --scope=racecraft --artifacts=artifacts/browser-racecraft-review-final
+node tools/browser/verify.mjs --scope=authoring --artifacts=artifacts/browser-authoring-review-final
+```

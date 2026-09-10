@@ -67,19 +67,22 @@ body clearance checked throughout the run.
 - **Defend:** more starting distance lets A hold position on the same hairpin.
 - **Esses duel:** side-by-side placement trades the advantage across successive bends.
 
-Click the scenario button to cycle examples. Use **+ / −** to change starting
-gap, B's entry speed advantage, lateral separation, or extra body clearance.
+**Load next example** replaces the race road, car and controls with a preset.
+Use **+ / −** to change starting gap, B's entry-cap delta, lateral separation,
+or extra body clearance. The cap delta applies at station zero; A starts farther
+along its path, so check the displayed realized starting speeds when comparing runs.
 Watch both speed traces and the signed position gap; a pass marker appears when
 the new leader is a full car length ahead. Drag the timeline, press **, / .** to
 step, or change playback speed to examine the crossover. **Save race / Load race**
 preserve the complete experiment in `racecraft.json`. **R** returns to your
-qualifying study.
+qualifying study, cancelling a pending race plan if needed.
 
 These are computed tactical experiments with authored intentions and a finite
 choice of alternative lines. Changing the inputs can prevent a pass or leave no
 safe plan; rejected edits retain the last valid race. Entry speeds are caps, and
 the replay ends when the first car finishes. See the [racecraft design and
 examples](docs/RACECRAFT.md) for assumptions and measured outcomes.
+The panel separates a guaranteed clearance bound from a sampled closest gap.
 
 Start directly or export without a graphical desktop:
 
@@ -92,6 +95,10 @@ go run ./main/cli race --scenario pass-repass --format gif --view 3d --out race.
 
 Rebuild the preview above with `go run ./tools/preview`. It contains qualifying,
 over-under, and pass/repass clips rendered by the same code as the live studio.
+The [implementation research](research/RACECRAFT_IMPLEMENTATION.md),
+[Claude CLI critique](research/CLAUDE_RACECRAFT_CRITIQUE.md), and
+[review response](research/RACECRAFT_CRITIQUE_RESPONSE.md) record the model,
+independent findings and subsequent fixes.
 
 For more, see [line studies](docs/LINE_STUDIES.md), [car setup](docs/SETUP.md), and [track editing](docs/TRACK_AUTHORING.md).
 

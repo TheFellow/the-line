@@ -4,6 +4,9 @@ Written 2026-09-10 against `a887689`, the first racecraft implementation in
 [PR #1](https://github.com/TheFellow/the-line/pull/1). This document records the
 implemented model and its evidence for an independent implementation critique.
 The user-facing design and controls are in [RACECRAFT.md](../docs/RACECRAFT.md).
+This is the frozen review baseline. See the [Claude CLI critique](CLAUDE_RACECRAFT_CRITIQUE.md)
+and [response](RACECRAFT_CRITIQUE_RESPONSE.md) for subsequent changes, including
+station-based placement mapping and updated measured event times.
 
 ## Question and scope
 

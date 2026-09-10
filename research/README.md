@@ -51,3 +51,6 @@ A simple static load split distinguishes FWD/RWD/AWD traction but does not repro
 [RACECRAFT_IMPLEMENTATION.md](RACECRAFT_IMPLEMENTATION.md) records the implemented
 tactical planner, continuous body-clearance argument, model boundaries and
 validation evidence for the independent Claude CLI critique of PR #1.
+The [preserved critique](CLAUDE_RACECRAFT_CRITIQUE.md) and
+[finding-by-finding response](RACECRAFT_CRITIQUE_RESPONSE.md) document the review,
+fixes, additional regression tests and remaining model limits.

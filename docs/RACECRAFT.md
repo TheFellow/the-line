@@ -16,10 +16,15 @@ If no safe pair exists, the experiment reports that explicitly and the GUI keeps
 the last valid experiment. This is an offline teaching experiment, not an online
 AI driver, a game-theoretic optimum, or a calibrated prediction of a real race.
 
-Controls use SI units: initial centre-to-centre road-station gap, attacker entry
-speed-cap advantage, lateral placement separation, and extra car-to-car clearance.
-Requested entry caps and realized starting speeds are reported separately: the
-solver can brake upstream and reduce an infeasible requested arrival speed.
+Controls use SI units: initial centre-to-centre road-station gap, B's entry
+speed-cap delta, lateral placement separation, and extra car-to-car clearance.
+The delta is relative to A's cap at station zero. A starts farther along its
+trajectory and may already have accelerated or braked; changing the gap also
+changes A's realized starting speed. A zero delta therefore does not promise
+equal starting speeds. B's effective cap is clamped at zero after applying the
+delta and any give-room reduction. The solver may further reduce speeds for grip
+or braking feasibility. The panel and CLI summary report both realized start
+speeds; JSON retains each effective cap and complete trajectory.
 Vehicle performance is shared, so tactical differences arise from placement and
 boundary conditions. Changing a control can change the outcome or make a plan
 infeasible; example titles do not force passes.
@@ -38,6 +43,10 @@ A pass event requires the new leader to gain a body length in reference-road
 station, with hysteresis; becoming momentarily nose-ahead is shown separately.
 Telemetry includes both cars' speed, station, signed gap, minimum certified
 clearance, and pass/repass events. A qualifying ghost remains a separate concept.
+The certified clearance is a conservative lower bound and can be loose; its
+value is not an estimate of the closest actual approach. The panel also shows
+the minimum over 401 evenly spaced samples, explicitly marked as sampled.
+Only the certified bound guarantees clearance between samples.
 
 ## Incremental delivery
 
@@ -60,10 +69,12 @@ preview must use the same planner and renderer as live playback.
 
 Press **R** or **Racecraft mode** in the studio. The qualifying study, camera and
 analysis display are retained for your return. Racecraft has its own open-road
-examples; its controls do not edit the qualifying track. **Next** cycles the four
-examples. The initial three use the identical Switchback hairpin geometry.
+examples; its controls do not edit the qualifying track. **Load next example**
+replaces the race road, vehicle and controls with the next complete preset.
+Save a custom experiment before loading another example. The initial three
+examples use the identical Switchback hairpin geometry.
 
-The four pairs of buttons change gap by 1 m, entry-cap advantage by 1 m/s,
+The four pairs of buttons change gap by 1 m, entry-cap delta by 1 m/s,
 placement separation by 0.25 m, and extra clearance by 0.1 m. The initial car A
 station is the requested gap, while B begins at station zero. Positive lateral
 offsets are left of the road centreline. Placement separation is the nominal
@@ -79,8 +90,11 @@ safe pair is selected, without optimizing or prescribing the winning car. The
 intent label adds “give room” when an alternative is selected; JSON includes the
 candidate count and each car's effective `entry_speed_cap`. There is no online
 reaction to the opponent after this offline plan is accepted.
+Control fractions select the nearest sampled road station, so nonuniform
+sampling does not redefine a fraction of road length. Very short roads that
+cannot hold distinct controls are rejected with a road-length diagnostic.
 
-**Space** pauses, **, / .** steps 1/60 s, **Tab** changes 2D/3D, and dragging the
+**Space** pauses, **, / .** (also with Shift) steps 1/60 s, **Tab** changes 2D/3D, and dragging the
 timeline scrubs both cars at the same race time. Scroll zooms, Shift-drag pans,
 and right-drag orbits the elevated view. Cars retain their physical drawn size
 when zoomed; their A/B labels identify them at wide zoom. Racecraft supports the
@@ -92,6 +106,15 @@ files; the browser verification build uses origin-local storage, like the other
 study types. Unsafe loaded experiments are rejected during planning. Loading or
 editing never replaces the displayed experiment until a safe plan is available.
 Race edits have save/load; qualifying's undo history belongs to that study.
+Press **R** during planning to cancel and return to qualifying. Edits are
+serialized while a plan is running. Pending qualifying CSV imports are cancelled
+when entering race mode; choose the file again after returning to qualifying.
+
+At startup, `--race-file` implies racecraft mode, even with `--mode qualifying`.
+`--vehicle` overrides the shared car in a loaded race experiment as well as the
+qualifying study; saving the race persists that override. GUI `--scene` and
+`--preset` select the retained qualifying study, which must initialize successfully.
+Use a complete `--race-file` to load a custom race road.
 
 ### Headless exports
 
@@ -114,6 +137,13 @@ go run ./main/cli race --scenario over-under --format gif --fps 20 \
 ```
 
 `--scene` and `--vehicle` override the road and shared car in CLI experiments.
+Exports must use a different file from their input scene, input experiment and
+`--save-experiment` destination. Saving back to the loaded experiment is allowed.
+Predictable destination/animation failures are checked before saved inputs are
+replaced. Export and experiment saves are individually atomic; they are not a
+multi-file transaction, so a later filesystem failure saving inputs can leave a
+completed export. CSV's `sampled_body_clearance_m` column is the instantaneous
+disc gap at each row (renamed from the initial PR's `body_clearance_m`).
 The authored normalized placements are designed for the named example geometry;
 a different road can yield different behavior or no safe plan. Arbitrary track
 corner detection and automatically choosing tactical intentions are future work.
@@ -122,15 +152,18 @@ corner detection and automatically choosing tactical intentions are future work.
 
 Default road car, 2 m input sampling, existing solver verification at ≤0.5 m:
 
-| Example | Initial gap | B entry advantage | Observed completed passes | First finish |
+| Example | Initial gap | B cap delta | Observed completed passes | First finish |
 | --- | ---: | ---: | --- | ---: |
-| Over-under | 6 m | 3 m/s | B at 12.92 s | 13.280 s |
-| Pass-repass | 5 m | 8 m/s | B at 6.18 s; A at 12.70 s | 13.239 s |
+| Over-under | 6 m | 3 m/s | B at 12.02 s | 13.275 s |
+| Pass-repass | 5 m | 8 m/s | B at 6.16 s; A at 11.84 s | 13.234 s |
 | Defend | 14 m | 0 m/s | None; A holds | 12.716 s |
 | Esses duel | 6 m | 4 m/s | None; nose-ahead advantage trades | 15.687 s |
 
 Events are resolved at 0.02 s with a 4.4 m station hysteresis. Nose-ahead changes
-are not completed passes. Increasing the default over-under gap to 7 m prevents
+are not completed passes. A is the nominal initial leader, including a zero-gap
+side-by-side start; B must gain more than 4.4 m to record a pass. Brief excursions
+between event samples may be missed; this does not affect continuous collision
+certification. Increasing the default over-under gap to 11 m prevents
 the completed pass before the finish. Setting its gap to 3.25 m and separation to
 5 m occupies the preferred line: the second candidate widens and delays B's
 crossover and reduces its arrival cap, producing a safe alternative. These are
