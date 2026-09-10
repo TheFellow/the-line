@@ -19,7 +19,7 @@ func (e evaluator) geometry(offset []float64) ([]pathState, error) {
 		bc := math.Hypot(c.X-b.X, c.Y-b.Y)
 		ac := math.Hypot(c.X-a.X, c.Y-a.Y)
 		if ab*bc*ac < 1e-9 {
-			return nil, fmt.Errorf("degenerate candidate")
+			return nil, fmt.Errorf("degenerate candidate at station %.2f m", e.road[i].S)
 		}
 		curves[i] = 2 * cross(b.X-a.X, b.Y-a.Y, c.X-b.X, c.Y-b.Y) / (ab * bc * ac)
 	}
@@ -45,11 +45,11 @@ func (e evaluator) geometry(offset []float64) ([]pathState, error) {
 		// same two authoritative triangles as the renderer, including warped banks.
 		polygon := []track.Vec3{a.AtOffset(a.Width/2 - e.clearance), a.AtOffset(-a.Width/2 + e.clearance), b.AtOffset(-b.Width/2 + e.clearance), b.AtOffset(b.Width/2 - e.clearance)}
 		if !convex(polygon) {
-			return nil, fmt.Errorf("clearance ribbon folds at station %d", i)
+			return nil, fmt.Errorf("clearance ribbon folds at station %.2f m", s.S)
 		}
 		for _, p := range []track.Vec3{points[i], points[i+1]} {
 			if !inside(polygon, p) {
-				return nil, fmt.Errorf("candidate leaves clearance ribbon")
+				return nil, fmt.Errorf("candidate leaves clearance ribbon at station %.2f m", s.S)
 			}
 			// Width is horizontal, but circular vehicle clearance is Euclidean:
 			// tapered side edges can be closer than cross-section width implies.
@@ -58,7 +58,7 @@ func (e evaluator) geometry(offset []float64) ([]pathState, error) {
 				dx, dy := edge1.X-edge0.X, edge1.Y-edge0.Y
 				gap := math.Abs(cross(dx, dy, p.X-edge0.X, p.Y-edge0.Y)) / math.Hypot(dx, dy)
 				if gap+1e-7 < e.clearance {
-					return nil, fmt.Errorf("candidate violates side-edge clearance")
+					return nil, fmt.Errorf("candidate violates side-edge clearance at station %.2f m", s.S)
 				}
 			}
 		}
