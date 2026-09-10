@@ -3,6 +3,9 @@ package main
 import "math"
 
 func (g *game) playbackDuration() float64 {
+	if g.race != nil {
+		return g.race.Duration
+	}
 	if g.result.Closed {
 		return g.result.Duration
 	}

@@ -10,6 +10,7 @@ import (
 	"math"
 	"syscall/js"
 
+	"github.com/TheFellow/the-line/pkg/racecraft"
 	"github.com/TheFellow/the-line/pkg/render"
 	"github.com/TheFellow/the-line/pkg/solver"
 	"github.com/TheFellow/the-line/pkg/track"
@@ -97,7 +98,19 @@ func inspectFrame(g *game) {
 		referenceStale = !g.reference.Compatible(g.solvedScene)
 		referenceDigest = g.reference.RoadDigest
 	}
+	type raceSnapshot struct {
+		Config    racecraft.Config  `json:"config"`
+		Nodes     [2]solver.Node    `json:"nodes"`
+		Events    []racecraft.Event `json:"events"`
+		Clearance float64           `json:"clearance"`
+		Radius    float64           `json:"radius"`
+	}
+	var race *raceSnapshot
+	if g.race != nil {
+		race = &raceSnapshot{g.race.Config, g.race.At(g.clock), g.race.Events, g.race.MinClearance, g.race.Cars[0].Radius}
+	}
 	data := struct {
+		Race              *raceSnapshot        `json:"race"`
 		PolishCandidates  int                  `json:"polishCandidates"`
 		Analysis          bool                 `json:"analysis"`
 		Sectors           []render.Sector      `json:"sectors"`
@@ -170,7 +183,7 @@ func inspectFrame(g *game) {
 		EndNode           solver.Node          `json:"endNode"`
 		CenterEndNode     solver.Node          `json:"centerEndNode"`
 	}{
-		Analysis: g.renderer.Analysis(), Sectors: g.renderer.Sectors(), Closed: g.result.Closed, StartNode: g.result.Nodes[0], SetupPage: g.setupPage, AuthoringOpen: g.authoringOpen,
+		Race: race, Analysis: g.renderer.Analysis(), Sectors: g.renderer.Sectors(), Closed: g.result.Closed, StartNode: g.result.Nodes[0], SetupPage: g.setupPage, AuthoringOpen: g.authoringOpen,
 		LineColor: string(g.renderer.LineColorMode()), ChartChannel: string(g.renderer.ChartChannel()),
 		PolishCandidates: g.result.PolishCandidates,
 		Markers:          g.renderer.Markers(), ForceCursor: g.renderer.ForceCursorWithState(g.clock, render.State{Playing: g.playing, Comparison: g.comparison}), ChartCursor: g.renderer.ChartCursorWithState(g.clock, render.State{Playing: g.playing, Comparison: g.comparison}),
