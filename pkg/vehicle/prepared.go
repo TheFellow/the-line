@@ -35,7 +35,7 @@ func (c *Config) preparedAxles(speed, normal float64, r RoadState) axleState {
 // FeasibleOn reports precisely Limits(...).Feasible without solving the unused
 // longitudinal boundaries. This is useful for a solver's lateral speed ceiling.
 func (c *Config) FeasibleOn(speed float64, r RoadState) bool {
-	if !r.valid || !finite(speed) || speed < 0 || c.Mass <= 0 || c.Grip <= 0 {
+	if !r.valid || !finite(speed) || speed < 0 || c.Mass <= 0 || c.Grip <= 0 || !c.validTransfer() {
 		return false
 	}
 	normal, lateral := r.forces(speed)
@@ -53,7 +53,7 @@ func (c *Config) FeasibleOn(speed float64, r RoadState) bool {
 // omitting the large instrumentation payload. Model.Limits remains the public
 // replacement-model contract; this fast path is specific to the built-in car.
 func (c *Config) BoundsOn(speed float64, r RoadState) (acceleration, braking float64, feasible bool) {
-	if !r.valid || !finite(speed) || speed < 0 || c.Mass <= 0 || c.Grip <= 0 {
+	if !r.valid || !finite(speed) || speed < 0 || c.Mass <= 0 || c.Grip <= 0 || !c.validTransfer() {
 		return 0, 0, false
 	}
 	normal, lateral := r.forces(speed)

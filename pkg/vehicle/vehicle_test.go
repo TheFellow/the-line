@@ -18,7 +18,7 @@ func TestFlatCircleOracle(t *testing.T) {
 	c := oracleCar()
 	v, k := 20.0, 0.01
 	got := c.Limits(v, k, 0, 0, 1)
-	near(t, got.Utilization, v*v*k/Gravity)
+	near(t, got.LateralUtilization, v*v*k/Gravity)
 	near(t, got.Acceleration, math.Sqrt(Gravity*Gravity-math.Pow(v*v*k, 2)))
 	if !got.Feasible {
 		t.Fatal("feasible circle rejected")
@@ -33,18 +33,18 @@ func TestBankSignsAndSymmetry(t *testing.T) {
 	adverse := c.Limits(20, .01, 12, 0, 1)
 	support := c.Limits(20, .01, -12, 0, 1)
 	mirror := c.Limits(20, -.01, 12, 0, 1)
-	if !(adverse.Utilization > flat.Utilization && flat.Utilization > support.Utilization) {
+	if !(adverse.LateralUtilization > flat.LateralUtilization && flat.LateralUtilization > support.LateralUtilization) {
 		t.Fatal("incorrect bank sign")
 	}
-	near(t, support.Utilization, mirror.Utilization)
+	near(t, support.LateralUtilization, mirror.LateralUtilization)
 	near(t, support.Acceleration, mirror.Acceleration)
 	straight := c.Limits(0, 0, 12, 0, 1)
-	near(t, straight.Utilization, math.Tan(12*math.Pi/180))
+	near(t, straight.LateralUtilization, math.Tan(12*math.Pi/180))
 	if !(straight.Acceleration < c.Limits(0, 0, 0, 0, 1).Acceleration) {
 		t.Fatal("straight cross slope did not consume grip")
 	}
 	v, k, b := 20.0, .01, 12*math.Pi/180
-	near(t, adverse.Utilization, (v*v*k*math.Cos(b)+Gravity*math.Sin(b))/(Gravity*math.Cos(b)-v*v*k*math.Sin(b)))
+	near(t, adverse.LateralUtilization, (v*v*k*math.Cos(b)+Gravity*math.Sin(b))/(Gravity*math.Cos(b)-v*v*k*math.Sin(b)))
 }
 func TestGradeAndDrag(t *testing.T) {
 	c := oracleCar()

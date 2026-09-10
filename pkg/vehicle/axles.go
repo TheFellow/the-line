@@ -2,6 +2,12 @@ package vehicle
 
 import "math"
 
+// The force API reports infeasibility for invalid transfer configuration;
+// Validate returns the descriptive error when a car is loaded or edited.
+func (c Config) validTransfer() bool {
+	return finite(c.CGHeight) && c.CGHeight >= 0 && (c.CGHeight == 0 || finite(c.Wheelbase) && c.Wheelbase >= .5)
+}
+
 func (c Config) axleDynamics() bool {
 	return c.FrontBrake != 0 || c.LiftArea != 0 || c.CGHeight != 0 || c.LoadSensitivity != 0
 }
@@ -88,7 +94,7 @@ func (s axleState) bound(lateral, sign float64) float64 {
 		if sign < 0 {
 			q = s.config.FrontBrake
 			if q == 0 {
-				return rf + rr
+				return s.insideBound(rf+rr, lateral, sign)
 			}
 		}
 		bound := math.Inf(1)
@@ -98,7 +104,7 @@ func (s axleState) bound(lateral, sign float64) float64 {
 		if q < 1 {
 			bound = math.Min(bound, rr/(1-q))
 		}
-		return bound
+		return s.insideBound(bound, lateral, sign)
 	}
 	if s.config.LoadSensitivity == 0 {
 		q := s.config.FrontDrive
@@ -109,11 +115,11 @@ func (s axleState) bound(lateral, sign float64) float64 {
 			h := s.config.CGHeight / s.config.Wheelbase
 			front := linearAxleBound(s.front, -sign*h, s.mu, q, lateral*s.config.FrontWeight)
 			rear := linearAxleBound(s.rear, sign*h, s.mu, 1-q, lateral*(1-s.config.FrontWeight))
-			return math.Max(0, math.Nextafter(math.Min(front, rear), 0))
+			return s.insideBound(math.Min(front, rear), lateral, sign)
 		}
 		if lateral == 0 { // ideal brakes, straight line; stop before rear lift-off
 			h := s.config.CGHeight / s.config.Wheelbase
-			return math.Nextafter(math.Min(s.mu*(s.front+s.rear), s.rear/h), 0)
+			return s.insideBound(math.Min(s.mu*(s.front+s.rear), s.rear/h), lateral, sign)
 		}
 	}
 	// Total load is constant under transfer; this is an upper bound even with
@@ -141,7 +147,11 @@ func (s axleState) bound(lateral, sign float64) float64 {
 			hi = x
 		}
 		if math.Abs(gap) < 1e-10 {
-			candidate := math.Max(0, x-1e-9)
+			candidate := x
+			if gap > 0 && derivative > 0 {
+				candidate -= gap / derivative
+			}
+			candidate = s.insideBound(candidate, lateral, sign)
 			if s.feasible(sign*candidate, lateral) {
 				return candidate
 			}
@@ -151,6 +161,30 @@ func (s axleState) bound(lateral, sign float64) float64 {
 			next = (lo + hi) * .5
 		}
 		x = next
+	}
+	return s.insideBound(lo, lateral, sign)
+}
+
+// insideBound reconciles round-off between the analytical root expression and
+// the direct circle check. Usually one ulp suffices; near a tangent circle the
+// capacity and hypot operations can require a few more.
+func (s axleState) insideBound(force, lateral, sign float64) float64 {
+	for range 16 {
+		force = math.Max(0, math.Nextafter(force, 0))
+		if s.feasible(sign*force, lateral) {
+			return force
+		}
+	}
+	// Extremely shallow boundaries can amplify an ulp of capacity. Retain a
+	// feasible bracket instead of assuming a fixed inset will suffice.
+	lo, hi := 0.0, force
+	for range 48 {
+		mid := (lo + hi) * .5
+		if s.feasible(sign*mid, lateral) {
+			lo = mid
+		} else {
+			hi = mid
+		}
 	}
 	return lo
 }
@@ -170,7 +204,7 @@ func (c Config) axleLimits(speed, curvature, bank, grade, grip float64) Envelope
 	capacity := front + rear
 	utilization := math.Max(math.Abs(lateral*c.FrontWeight)/front, math.Abs(lateral*(1-c.FrontWeight))/rear)
 	if !s.feasible(0, lateral) {
-		return Envelope{Utilization: utilization}
+		return Envelope{LateralUtilization: utilization}
 	}
 	driveGrip := s.bound(lateral, 1)
 	power := capacity
@@ -180,7 +214,7 @@ func (c Config) axleLimits(speed, curvature, bank, grade, grip float64) Envelope
 	drive := math.Min(driveGrip, power)
 	brake := math.Min(c.Brake, s.bound(lateral, -1))
 	resistance := .5*AirDensity*c.DragArea*speed*speed/c.Mass + Gravity*grade*cosGrade
-	return Envelope{Acceleration: drive - resistance, Braking: brake + resistance, Utilization: utilization, Feasible: true, Tyres: TyreEnvelope{Available: true, Lateral: lateral, Capacity: capacity, Resistance: resistance, Drive: drive, Brake: brake, DriveGrip: driveGrip, Power: power, BrakeLimit: c.Brake, axles: s}}
+	return Envelope{Acceleration: drive - resistance, Braking: brake + resistance, LateralUtilization: utilization, Feasible: true, Tyres: TyreEnvelope{Available: true, Lateral: lateral, Capacity: capacity, Resistance: resistance, Drive: drive, Brake: brake, DriveGrip: driveGrip, Power: power, BrakeLimit: c.Brake, axles: s}}
 }
 
 // linearAxleBound solves q²F²+Y² <= mu²(N+alpha*F)², starting
@@ -226,13 +260,20 @@ func (s axleState) gapDerivative(force, lateral, sign float64) (float64, float64
 		dr *= sr * (1 - c.LoadSensitivity)
 	}
 	lf, lr := lateral*c.FrontWeight, lateral*(1-c.FrontWeight)
-	if math.Abs(lf) > cf || math.Abs(lr) > cr {
-		return math.Inf(1), math.Inf(1)
-	}
+	// Keep a finite constraint outside the lateral boundary so Newton can
+	// approach an unloading axle from either side. Fixed-split circles below
+	// already include this lateral demand; ideal brakes need the guard before
+	// taking their residual square roots.
 	q := c.FrontDrive
 	if sign < 0 {
 		q = c.FrontBrake
 		if q == 0 {
+			if math.Abs(lf) > cf || math.Abs(lr) > cr {
+				if math.Abs(lf)-cf > math.Abs(lr)-cr {
+					return math.Abs(lf) - cf, -df
+				}
+				return math.Abs(lr) - cr, -dr
+			}
 			rf, rr := math.Sqrt(math.Max(0, cf*cf-lf*lf)), math.Sqrt(math.Max(0, cr*cr-lr*lr))
 			return force - rf - rr, 1 - cf*df/rf - cr*dr/rr
 		}

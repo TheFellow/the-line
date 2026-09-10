@@ -54,6 +54,9 @@ func (r *Renderer) setupFrame(im *image.RGBA, state State) {
 		if field.Key == "mass" || field.Key == "power" || field.Key == "max_speed" {
 			label = fmt.Sprintf("%s  %.0f %s", field.Label, value*field.DisplayScale, field.Unit)
 		}
+		if field.Key == "aero_balance" && value == 0 {
+			label = "Aero front  0% (all rear)"
+		}
 		if field.Key == "front_brake" && value == 0 {
 			label = "Front brake  ideal allocation"
 		}

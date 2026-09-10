@@ -29,7 +29,7 @@ type Config struct {
 	// front brake fraction. This sentinel preserves existing serialized cars.
 	FrontBrake      float64 `json:"front_brake,omitempty"`
 	LiftArea        float64 `json:"lift_area,omitempty"`        // positive downforce ClA, m²
-	AeroBalance     float64 `json:"aero_balance,omitempty"`     // front downforce fraction
+	AeroBalance     float64 `json:"aero_balance,omitempty"`     // front downforce fraction; zero means all rear
 	CGHeight        float64 `json:"cg_height,omitempty"`        // m; zero disables transfer
 	Wheelbase       float64 `json:"wheelbase,omitempty"`        // m; required with CGHeight
 	LoadSensitivity float64 `json:"load_sensitivity,omitempty"` // exponent [0, 0.5]
@@ -49,11 +49,11 @@ type Model interface {
 // signed forward acceleration; Braking is maximum deceleration magnitude.
 // Either may be negative if resistance or gravity exceeds tyre capability.
 // Feasible reports lateral/load feasibility, not the sign of these bounds.
-// Utilization is lateral demand/capacity: combined for legacy configurations,
+// LateralUtilization is lateral demand/capacity: combined for legacy configurations,
 // or the maximum axle ratio with optional dynamics enabled.
 type Envelope struct {
-	Acceleration, Braking, Utilization float64
-	Feasible                           bool
+	Acceleration, Braking, LateralUtilization float64
+	Feasible                                  bool
 	// Tyres exposes the force balance used above. Custom models may leave it
 	// unavailable; presentation must not invent channels for an opaque model.
 	Tyres TyreEnvelope
@@ -92,7 +92,7 @@ func (c Config) Limits(speed, curvature, bank, grade, grip float64) Envelope {
 			return Envelope{}
 		}
 	}
-	if speed < 0 || grip <= 0 || c.Mass <= 0 || c.Grip <= 0 {
+	if speed < 0 || grip <= 0 || c.Mass <= 0 || c.Grip <= 0 || !c.validTransfer() {
 		return Envelope{}
 	}
 	if c.axleDynamics() {
@@ -109,7 +109,7 @@ func (c Config) Limits(speed, curvature, bank, grade, grip float64) Envelope {
 	}
 	utilization := math.Abs(lateral) / capacity
 	if utilization > 1+1e-10 {
-		return Envelope{Utilization: utilization}
+		return Envelope{LateralUtilization: utilization}
 	}
 	residual := math.Sqrt(math.Max(0, capacity*capacity-lateral*lateral))
 	front, rear := residual*c.FrontWeight, residual*(1-c.FrontWeight)
@@ -137,7 +137,7 @@ func (c Config) Limits(speed, curvature, bank, grade, grip float64) Envelope {
 		scale = math.Min(scale, (1-c.FrontWeight)/(1-c.FrontDrive))
 	}
 	brake := math.Min(c.Brake, residual)
-	return Envelope{Acceleration: drive - resistance, Braking: brake + resistance, Utilization: utilization, Feasible: true,
+	return Envelope{Acceleration: drive - resistance, Braking: brake + resistance, LateralUtilization: utilization, Feasible: true,
 		Tyres: TyreEnvelope{Available: true, Lateral: lateral, Capacity: capacity, Resistance: resistance,
 			Drive: drive, Brake: brake, DriveGrip: driveGrip, Power: power,
 			DriveScale: scale, BrakeScale: 1, BrakeLimit: c.Brake}}

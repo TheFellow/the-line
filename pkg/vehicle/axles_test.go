@@ -43,7 +43,7 @@ func TestDownforceCornerOracleAndDragIndependence(t *testing.T) {
 	if !e.Feasible {
 		t.Fatal("analytic corner speed rejected")
 	}
-	near(t, e.Utilization, 1)
+	near(t, e.LateralUtilization, 1)
 	if c.Limits(v*1.00001, k, 0, 0, 1).Feasible {
 		t.Fatal("above analytic corner speed accepted")
 	}
@@ -125,7 +125,7 @@ func TestInactiveOptionsKeepLegacyBits(t *testing.T) {
 		for _, v := range []float64{0, 10, 30, 60} {
 			for _, k := range []float64{-.01, 0, .01} {
 				a, b := c.Limits(v, k, 5, .1, 1), inactive.Limits(v, k, 5, .1, 1)
-				if math.Float64bits(a.Acceleration) != math.Float64bits(b.Acceleration) || math.Float64bits(a.Braking) != math.Float64bits(b.Braking) || math.Float64bits(a.Utilization) != math.Float64bits(b.Utilization) || a.Feasible != b.Feasible {
+				if math.Float64bits(a.Acceleration) != math.Float64bits(b.Acceleration) || math.Float64bits(a.Braking) != math.Float64bits(b.Braking) || math.Float64bits(a.LateralUtilization) != math.Float64bits(b.LateralUtilization) || a.Feasible != b.Feasible {
 					t.Fatal("inactive fields changed legacy arithmetic")
 				}
 			}
