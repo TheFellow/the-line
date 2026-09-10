@@ -194,3 +194,59 @@ func segmentDistance(a, b, c, d track.Vec3) float64 {
 	}
 	return math.Min(math.Min(distance(a, c, d), distance(b, c, d)), math.Min(distance(c, a, b), distance(d, a, b)))
 }
+
+func TestEntrySpeedCaps(t *testing.T) {
+	v, err := vehicle.Preset("road")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name             string
+		entry, advantage float64
+		wantB            float64
+		fallback         bool
+	}{
+		{name: "zero", entry: 0, wantB: 0},
+		{name: "fractional", entry: .25, wantB: .25},
+		{name: "fractional after advantage", entry: 2, advantage: -1.5, wantB: .5},
+		{name: "negative effective cap", entry: 2, advantage: -3, wantB: 0},
+		{name: "negative fallback cap", entry: .5, wantB: 0, fallback: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := track.Scene{Version: 1, Name: "Entry caps", Vehicle: "road", EntrySpeed: tc.entry, ExitSpeed: 30,
+				Points: []track.Point{{Width: 20, Surface: "asphalt"}, {X: 200, Width: 20, Surface: "asphalt"}}}
+			c := racecraft.DefaultConfig("defend")
+			c.Overspeed = tc.advantage
+			wantCandidates := 1
+			if tc.fallback {
+				// Initial body overlap rejects the first two lane placements.
+				c.Gap, c.Separation = 0, 4.5
+				wantCandidates = 3
+			}
+			r, err := racecraft.Plan(context.Background(), s, v, c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r.Candidates != wantCandidates {
+				t.Fatalf("candidates = %d, want %d", r.Candidates, wantCandidates)
+			}
+			for i, wantCap := range []float64{tc.entry, tc.wantB} {
+				path := r.Cars[i].Path
+				if path.EntrySpeedCap != wantCap {
+					t.Errorf("car %d entry cap = %g, want %g", i, path.EntrySpeedCap, wantCap)
+				}
+				// On this unconstrained straight, the initial speed should reach the
+				// cap, including a standstill launch when the effective cap is zero.
+				if math.Abs(path.Nodes[0].Speed-wantCap) > 1e-9 {
+					t.Errorf("car %d entry speed = %g, want %g", i, path.Nodes[0].Speed, wantCap)
+				}
+				if path.ExitSpeedCap != s.ExitSpeed || path.Nodes[len(path.Nodes)-1].Speed > s.ExitSpeed+1e-9 {
+					t.Errorf("car %d exit cap was not respected", i)
+				}
+			}
+			if r.At(0)[1].Speed > tc.wantB+1e-9 {
+				t.Errorf("B starts above its effective cap: %g > %g", r.At(0)[1].Speed, tc.wantB)
+			}
+		})
+	}
+}

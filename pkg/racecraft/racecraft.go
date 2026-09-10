@@ -143,7 +143,9 @@ func Plan(ctx context.Context, scene track.Scene, v vehicle.Config, c Config) (R
 			}
 			s := scene
 			if car == 1 {
-				s.EntrySpeed = math.Max(1, scene.EntrySpeed+c.Overspeed-variant*8)
+				// A negative advantage or give-room reduction means a standstill
+				// cap once it reaches zero; never raise a requested cap to launch.
+				s.EntrySpeed = math.Max(0, scene.EntrySpeed+c.Overspeed-variant*8)
 				if variant > 0 {
 					intent += " / give room"
 				}
