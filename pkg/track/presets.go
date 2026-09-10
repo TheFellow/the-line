@@ -1,8 +1,8 @@
 package track
 
-import "fmt"
-
-func Presets() []string { return []string{"hairpin", "esses", "compound", "banked", "rally"} }
+func Presets() []string {
+	return []string{"hairpin", "esses", "compound", "banked", "rally", "decreasing-radius", "banked-bowl", "compression", "chicane", "long-double-apex", "blind-crest"}
+}
 
 // Preset returns independent illustrative geometry, not surveyed real-world tracks.
 func Preset(name string) (Scene, error) {
@@ -28,7 +28,7 @@ func Preset(name string) (Scene, error) {
 		s.ExitSpeed = 40
 		xy = [][2]float64{{-145, -35}, {-100, -35}, {-60, -10}, {-25, 25}, {15, 25}, {50, -10}, {80, -35}, {115, -20}, {145, 20}, {190, 35}}
 	default:
-		return Scene{}, fmt.Errorf("track: unknown preset %q", name)
+		return archetype(name)
 	}
 	for i, v := range xy {
 		p := Point{X: v[0], Y: v[1], Width: 12, Surface: "asphalt"}

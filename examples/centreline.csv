@@ -1,0 +1,9 @@
+x,y,z,width_left,width_right,bank,surface
+-150,-50,0,6,7,0,asphalt
+-80,-50,0,6,7,0,asphalt
+-10,-40,2,6,7,-3,asphalt
+45,-10,4,6,6,-6,asphalt
+70,45,5,6,6,-6,asphalt
+45,100,3,6,7,-3,asphalt
+-20,125,1,6,7,0,asphalt
+-100,125,0,6,7,0,asphalt
