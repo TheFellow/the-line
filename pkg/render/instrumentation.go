@@ -166,15 +166,25 @@ func forcePoint(n solver.Node, scale float64) point {
 
 // ForceCursor returns the actual demand-dot display coordinates for headless
 // interaction verification. It uses the same time, force query and projection
-// as the widget; the reference is sampled at shared elapsed time.
+// as playing animation; the reference is sampled at shared elapsed time.
 func (r *Renderer) ForceCursor(t float64) [2]float64 {
-	n, ref := r.result.At(t), r.referenceAt(t)
+	return r.ForceCursorWithState(t, State{Playing: true, Comparison: true})
+}
+
+// ForceCursorWithState also preserves paused inspection of the lap endpoint.
+func (r *Renderer) ForceCursorWithState(t float64, state State) [2]float64 {
+	n, ref := r.frameNode(t, state), r.referenceAt(r.frameTime(t, state))
 	p := forcePoint(n, r.forceScale(n, ref))
 	return [2]float64{r.displayX + p.x*r.displayScale, r.displayY + p.y*r.displayScale}
 }
 
 func (r *Renderer) ChartCursor(t float64) [2]float64 {
-	p := r.chartPoint(r.result.At(t))
+	return r.ChartCursorWithState(t, State{Playing: true, Comparison: true})
+}
+
+// ChartCursorWithState follows the rendered car, including a paused lap end.
+func (r *Renderer) ChartCursorWithState(t float64, state State) [2]float64 {
+	p := r.chartPoint(r.frameNode(t, state))
 	return [2]float64{r.displayX + p.x*r.displayScale, r.displayY + p.y*r.displayScale}
 }
 
