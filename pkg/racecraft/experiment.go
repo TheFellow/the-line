@@ -1,6 +1,7 @@
 package racecraft
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -43,7 +44,14 @@ func (e Experiment) Validate() error {
 }
 func Decode(r io.Reader) (Experiment, error) {
 	var e Experiment
-	dec := json.NewDecoder(io.LimitReader(r, 4<<20))
+	data, err := io.ReadAll(io.LimitReader(r, (4<<20)+1))
+	if err != nil {
+		return e, err
+	}
+	if len(data) > 4<<20 {
+		return e, fmt.Errorf("race experiment exceeds 4 MiB")
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&e); err != nil {
 		return e, err

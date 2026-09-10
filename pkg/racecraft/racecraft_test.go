@@ -71,7 +71,7 @@ func TestExamples(t *testing.T) {
 							if sign < 0 {
 								left, right = p.AtOffset(-p.RightLimit()), q.AtOffset(-q.RightLimit())
 							}
-							if distance(n.Position, left, right) < car.Radius+.2499 {
+							if segmentDistance(n.Position, next.Position, left, right) < car.Radius+.2499 {
 								t.Fatalf("body leaves road at %.2f", n.Station)
 							}
 						}
@@ -182,4 +182,12 @@ func TestOccupiedLineAdaptsPlacementAndArrival(t *testing.T) {
 			t.Fatal("adapted plan overlaps")
 		}
 	}
+}
+
+func segmentDistance(a, b, c, d track.Vec3) float64 {
+	cross := func(p, q, r track.Vec3) float64 { return (q.X-p.X)*(r.Y-p.Y) - (q.Y-p.Y)*(r.X-p.X) }
+	if cross(a, b, c)*cross(a, b, d) < 0 && cross(c, d, a)*cross(c, d, b) < 0 {
+		return 0
+	}
+	return math.Min(math.Min(distance(a, c, d), distance(b, c, d)), math.Min(distance(c, a, b), distance(d, a, b)))
 }

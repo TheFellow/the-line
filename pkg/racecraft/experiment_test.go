@@ -28,6 +28,9 @@ func TestExperimentRoundTrip(t *testing.T) {
 			t.Fatal("accepted malformed experiment")
 		}
 	}
+	if _, err := racecraft.Decode(strings.NewReader(string(data) + strings.Repeat(" ", 4<<20))); err == nil {
+		t.Fatal("accepted oversized experiment")
+	}
 	e.Config.Gap = -1
 	if err := racecraft.Save(file, e); err == nil {
 		t.Fatal("saved invalid experiment")

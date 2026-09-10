@@ -25,9 +25,11 @@ func certify(ctx context.Context, r Result) (float64, bool) {
 		return math.Hypot(n[0].Position.X-n[1].Position.X, n[0].Position.Y-n[1].Position.Y)
 	}
 	minimum := math.Inf(1)
+	intervals := 0
 	var interval func(float64, float64, float64, float64) bool
 	interval = func(a, b, da, db float64) bool {
-		if ctx.Err() != nil || da < required || db < required {
+		intervals++
+		if intervals > 250000 || ctx.Err() != nil || da < required || db < required {
 			return false
 		}
 		lower := math.Min(da, db) - speed*(b-a)/2

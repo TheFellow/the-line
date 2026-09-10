@@ -102,6 +102,9 @@ func Scene(name string) (track.Scene, error) {
 // Its finite candidate order is deterministic. It supports open custom scenes;
 // the scenario's normalized placements are intentions, not inferred apexes.
 func Plan(ctx context.Context, scene track.Scene, v vehicle.Config, c Config) (Result, error) {
+	if err := ctx.Err(); err != nil {
+		return Result{}, err
+	}
 	if err := c.Validate(); err != nil {
 		return Result{}, err
 	}
