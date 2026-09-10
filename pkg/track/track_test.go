@@ -57,7 +57,7 @@ func TestPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, scene) {
+	if !reflect.DeepEqual(got, Migrate(scene)) {
 		t.Fatal("round trip changed scene")
 	}
 	data, _ := os.ReadFile(path)

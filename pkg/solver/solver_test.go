@@ -123,7 +123,7 @@ func verifyResult(t *testing.T, r Result, s track.Scene, v vehicle.Config, opts 
 			dx, dy := p.X-road.Position.X, p.Y-road.Position.Y
 			if math.Abs(dx*road.Normal.Y-dy*road.Normal.X) < 1e-6 {
 				offsets[i] = dx*road.Normal.X + dy*road.Normal.Y
-				if math.Abs(offsets[i])+v.Width/2+opts.Margin > road.Width/2+1e-6 {
+				if offsets[i]+v.Width/2+opts.Margin > road.LeftLimit()+1e-6 || -offsets[i]+v.Width/2+opts.Margin > road.RightLimit()+1e-6 {
 					t.Fatal("clearance exceeded")
 				}
 				found = true

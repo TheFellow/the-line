@@ -16,6 +16,7 @@ func Save(path string, scene Scene) (err error) {
 	if _, err = SampleRoad(scene, 2); err != nil {
 		return err
 	}
+	scene = Migrate(scene)
 	data, err := json.Marshal(scene)
 	if err != nil {
 		return err
@@ -50,5 +51,5 @@ func Load(path string) (scene Scene, err error) {
 	if _, err := SampleRoad(scene, 2); err != nil {
 		return Scene{}, err
 	}
-	return scene, nil
+	return Migrate(scene), nil
 }

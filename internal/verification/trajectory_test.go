@@ -94,7 +94,7 @@ func checkClearance(t *testing.T, r solver.Result, required float64) float64 {
 		for j := 0; j < len(r.Road)-1; j++ {
 			for _, sign := range []float64{-1, 1} {
 				a, b := r.Road[j], r.Road[j+1]
-				d := segmentDistance(r.Nodes[i].Position, r.Nodes[i+1].Position, a.AtOffset(sign*a.Width/2), b.AtOffset(sign*b.Width/2))
+				d := segmentDistance(r.Nodes[i].Position, r.Nodes[i+1].Position, a.AtOffset(physicalEdge(a, sign)), b.AtOffset(physicalEdge(b, sign)))
 				least = math.Min(least, d)
 				if d < required-1e-6 {
 					t.Fatalf("path segment %d is %.9fm from road side %d, requires %.9fm circular clearance", i, d, j, required)
@@ -122,7 +122,7 @@ func checkForces(t *testing.T, r solver.Result, c vehicle.Config) float64 {
 		found := false
 		for cursor < len(r.Nodes) {
 			p := r.Nodes[cursor].Position.Sub(road.Position)
-			if math.Abs(p.X*road.Normal.Y-p.Y*road.Normal.X) < 1e-5 && math.Hypot(p.X, p.Y) <= road.Width/2+1e-5 {
+			if math.Abs(p.X*road.Normal.Y-p.Y*road.Normal.X) < 1e-5 && math.Hypot(p.X, p.Y) <= math.Max(physicalEdge(road, 1), -physicalEdge(road, -1))+1e-5 {
 				anchors[i] = cursor
 				cursor++
 				found = true
@@ -143,8 +143,8 @@ func checkForces(t *testing.T, r solver.Result, c vehicle.Config) float64 {
 		for i := first; i < last; i++ {
 			a, b := r.Nodes[i], r.Nodes[i+1]
 			ra, rb := r.Road[cell], r.Road[cell+1]
-			rightA, leftA := ra.AtOffset(-ra.Width/2), ra.AtOffset(ra.Width/2)
-			rightB, leftB := rb.AtOffset(-rb.Width/2), rb.AtOffset(rb.Width/2)
+			rightA, leftA := ra.AtOffset(physicalEdge(ra, -1)), ra.AtOffset(physicalEdge(ra, 1))
+			rightB, leftB := rb.AtOffset(physicalEdge(rb, -1)), rb.AtOffset(physicalEdge(rb, 1))
 			for _, p := range []track.Vec3{a.Position, a.Position.Add(b.Position).Mul(.5), b.Position} {
 				z, inside := triangleHeight(p, rightA, rightB, leftB)
 				if !inside {
@@ -180,7 +180,19 @@ func checkForces(t *testing.T, r solver.Result, c vehicle.Config) float64 {
 				lateral := v*v*gradeCos*gradeCos*k*math.Cos(bank) + vehicle.Gravity*gradeCos*math.Sin(bank)
 				// Surface identity belongs to the outgoing source station. The production
 				// solver may apply a still lower adjacent value conservatively.
-				capacity := r.Road[cell].Grip * c.Grip * normal
+				mu := ra.Grip
+				if ra.KerbsCountAsRoad {
+					offset := r.Nodes[first].Offset*(1-u) + r.Nodes[last].Offset*u
+					left := ra.WidthLeft*(1-u) + rb.WidthLeft*u
+					right := ra.WidthRight*(1-u) + rb.WidthRight*u
+					if offset+c.Width/2 > left {
+						mu = math.Min(mu, kerbFriction(ra.KerbLeft))
+					}
+					if offset-c.Width/2 < -right {
+						mu = math.Min(mu, kerbFriction(ra.KerbRight))
+					}
+				}
+				capacity := mu * c.Grip * normal
 				if normal <= 0 || math.Abs(lateral) > capacity+1e-5 {
 					t.Fatalf("segment %d has infeasible lateral force", i)
 				}
@@ -206,4 +218,38 @@ func checkForces(t *testing.T, r solver.Result, c vehicle.Config) float64 {
 		}
 	}
 	return maxExcess
+}
+
+// Reconstruct legal edge offsets from exported physical fields; do not use the
+// solver's offset bounds or track's convenience boundary/footprint functions.
+func physicalEdge(s track.Sample, side float64) float64 {
+	left, right := s.WidthLeft, s.WidthRight
+	if left == 0 && right == 0 {
+		left, right = s.Width/2, s.Width/2
+	}
+	if s.KerbsCountAsRoad {
+		left += s.KerbLeft.Width
+		right += s.KerbRight.Width
+	}
+	if side > 0 {
+		return left
+	}
+	return -right
+}
+func kerbFriction(k track.Kerb) float64 {
+	if k.Width == 0 {
+		return math.Inf(1)
+	}
+	if k.Grip > 0 {
+		return k.Grip
+	}
+	if k.Surface == "" {
+		return .8
+	}
+	for _, s := range track.Surfaces() {
+		if s.Name == k.Surface {
+			return s.Grip
+		}
+	}
+	return 0
 }

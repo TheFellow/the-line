@@ -30,7 +30,7 @@ func Load(path string) (Scene, error) {
 	if _, err := SampleRoad(scene, 2); err != nil {
 		return Scene{}, err
 	}
-	return scene, nil
+	return Migrate(scene), nil
 }
 
 // Save atomically replaces path only after scene validation succeeds.
@@ -38,6 +38,7 @@ func Save(path string, scene Scene) error {
 	if _, err := SampleRoad(scene, 2); err != nil {
 		return err
 	}
+	scene = Migrate(scene)
 	data, err := json.MarshalIndent(scene, "", "  ")
 	if err != nil {
 		return err
