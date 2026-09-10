@@ -20,6 +20,26 @@ go run ./main/gui
 go run ./main/cli presets
 ```
 
+## Live editor
+
+Drag a control point and release to recompute the line. Use the sidebar to change width, bank, elevation and surface, add or delete controls, switch vehicles and cycle the built-in sequences. Playback continues while a background solve runs. A rejected edit restores the last valid scene.
+
+| Control | Action |
+| --- | --- |
+| Space / playback button | Pause or resume |
+| Timeline | Scrub the simulated time |
+| Tab / view button | Switch plan and elevated views |
+| Home | Restart the sequence |
+| `[` / `]` | Select the previous / next control |
+| Arrow keys | Move the selected control by one metre |
+| N / Delete | Insert / delete a control |
+| Cmd/Ctrl+N | Start a new sequence |
+| Cmd/Ctrl+S / Cmd/Ctrl+O | Save / load the displayed file path |
+| Cmd/Ctrl+Z / Cmd/Ctrl+Shift+Z | Undo / redo |
+| Escape | Close the studio |
+
+Click the file path to edit it, use Cmd/Ctrl+A to clear it, and Enter to confirm. Vehicle JSON examples and editable corner fixtures are in [examples](examples/). Custom vehicle files can be used with CLI solving/rendering; the live vehicle button cycles the built-in presets.
+
 ## CLI
 
 ```sh
@@ -71,6 +91,10 @@ Vehicle configuration uses SI units: mass in kg, power in W, braking acceleratio
 make test
 make vet
 make verify
+
+# Exercise the live editor and capture actual Ebitengine output.
+./bin/the-line-studio --demo --frames 240 --file artifacts/edited.json \
+  --capture artifacts/editor.png --report artifacts/editor-report.json
 ```
 
 The independent pre-implementation research review lives in [research/CRITIQUE.md](research/CRITIQUE.md), alongside [sources and design rationale](research/README.md). The public packages separate `track`, `vehicle`, `solver` and `render`; `internal/editor` owns transactional editing and `internal/cli` owns commands. Executable wiring is under `main/cli` and `main/gui`.

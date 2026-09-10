@@ -7,9 +7,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"image"
-	"image/color/palette"
-	"image/draw"
 	"image/gif"
 	"image/png"
 	"io"
@@ -41,8 +38,8 @@ Common flags:
   --scene track.json   Load an existing scene instead
   --vehicle gt         Override the scene vehicle preset
   --vehicle-file car.json  Use custom vehicle parameters
-  --spacing 2          Road sample spacing in metres
-  --iterations 8       Search iterations
+  --spacing 3          Search sample spacing in metres
+  --iterations 4       Search iterations
   --out path           Output file (solve prints JSON if omitted)
 
 Run a command with --help for its flags.
@@ -310,13 +307,13 @@ func writeAnimation(a arguments, r *render.Renderer, total float64) error {
 		return errors.New("animation exceeds memory budget; reduce duration, fps, or image size")
 	}
 	animation := gif.GIF{LoopCount: 0}
+	quantizer := newGIFQuantizer(r.Frame(a.at))
 	for i := 0; i < frames; i++ {
 		// GIF timing is in hundredths. Distribute rounding to preserve the clock.
 		begin := int(math.Round(float64(i) * 100 / a.fps))
 		end := int(math.Round(float64(i+1) * 100 / a.fps))
 		frame := r.Frame(a.at + float64(begin)/100)
-		p := image.NewPaletted(frame.Bounds(), palette.Plan9)
-		draw.Draw(p, p.Bounds(), frame, frame.Bounds().Min, draw.Src)
+		p := quantizer.frame(frame)
 		animation.Image = append(animation.Image, p)
 		animation.Delay = append(animation.Delay, max(1, end-begin))
 	}
