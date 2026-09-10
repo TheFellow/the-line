@@ -1,0 +1,103 @@
+{
+  "racecraft": {
+    "version": 1,
+    "scenario": "esses-duel",
+    "gap_m": 6,
+    "overspeed_mps": 4,
+    "separation_m": 6,
+    "clearance_m": 0.2
+  },
+  "scene": {
+    "version": 2,
+    "name": "Rhythm Section",
+    "vehicle": "road",
+    "entry_speed_cap": 38,
+    "exit_speed_cap": 55,
+    "points": [
+      {
+        "x": -135,
+        "y": -35,
+        "z": 0,
+        "width": 12,
+        "bank": 0,
+        "surface": "asphalt"
+      },
+      {
+        "x": -90,
+        "y": -35,
+        "z": 0,
+        "width": 12,
+        "bank": 0,
+        "surface": "asphalt"
+      },
+      {
+        "x": -50,
+        "y": -15,
+        "z": 0,
+        "width": 12,
+        "bank": 0,
+        "surface": "asphalt"
+      },
+      {
+        "x": -20,
+        "y": 30,
+        "z": 0,
+        "width": 12,
+        "bank": 0,
+        "surface": "asphalt"
+      },
+      {
+        "x": 20,
+        "y": 40,
+        "z": 0,
+        "width": 12,
+        "bank": 0,
+        "surface": "asphalt"
+      },
+      {
+        "x": 55,
+        "y": 5,
+        "z": 0,
+        "width": 12,
+        "bank": 0,
+        "surface": "asphalt"
+      },
+      {
+        "x": 80,
+        "y": -35,
+        "z": 0,
+        "width": 12,
+        "bank": 0,
+        "surface": "asphalt"
+      },
+      {
+        "x": 120,
+        "y": -45,
+        "z": 0,
+        "width": 12,
+        "bank": 0,
+        "surface": "asphalt"
+      },
+      {
+        "x": 165,
+        "y": -20,
+        "z": 0,
+        "width": 12,
+        "bank": 0,
+        "surface": "asphalt"
+      }
+    ]
+  },
+  "vehicle": {
+    "name": "Club Sport · RWD",
+    "mass": 1250,
+    "power": 155000,
+    "brake": 10,
+    "max_speed": 65,
+    "grip": 1.05,
+    "drag_area": 0.66,
+    "front_weight": 0.52,
+    "front_drive": 0,
+    "width": 1.8
+  }
+}

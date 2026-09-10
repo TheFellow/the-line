@@ -45,3 +45,12 @@ A simple static load split distinguishes FWD/RWD/AWD traction but does not repro
 - Every output station fits the road with vehicle margin, speeds/times finite, time monotonic, and combined force demand respects the implemented envelope. Inspect interpolated geometry too; station-only bounds do not justify arbitrary smoothing of the final line.
 - Optimized result no slower than identical-boundary centreline baseline, representative presets measurably improve, repeated solves deterministic. Results are locally optimized estimates, not a mathematical proof of globally shortest time.
 - Headless editor create/edit/save/load exercise, CLI workflow, PNG and animated GIF inspection in both views, GUI finite-frame capture and actual real-time execution. Record measured outcomes and limitations in repository documentation.
+
+## Two-car racecraft
+
+[RACECRAFT_IMPLEMENTATION.md](RACECRAFT_IMPLEMENTATION.md) records the implemented
+tactical planner, continuous body-clearance argument, model boundaries and
+validation evidence for the independent Claude CLI critique of PR #1.
+The [preserved critique](CLAUDE_RACECRAFT_CRITIQUE.md) and
+[finding-by-finding response](RACECRAFT_CRITIQUE_RESPONSE.md) document the review,
+fixes, additional regression tests and remaining model limits.

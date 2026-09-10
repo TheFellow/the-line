@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 import { presentationChecks } from "./presentation.mjs";
+import { racecraftChecks } from "./racecraft.mjs";
 import { closedChecks } from "./closed.mjs";
 import { onceChecks } from "./once.mjs";
 import { roadmapChecks } from "./roadmap.mjs";
@@ -22,7 +23,7 @@ const artifactOption = process.argv.find(a => a.startsWith("--artifacts="))?.sli
 const artifacts = path.resolve(root, artifactOption || "artifacts/browser");
 const selected = process.argv.find((a) => a.startsWith("--case="))?.slice(7);
 const scope = process.argv.find((a) => a.startsWith("--scope="))?.slice(8) || "all";
-assert.ok(["once", "interaction", "analysis", "setup", "instrumentation", "manual", "authoring", "presentation", "closed", "roadmap", "all"].includes(scope), `Unknown scope: ${scope}`);
+assert.ok(["racecraft", "once", "interaction", "analysis", "setup", "instrumentation", "manual", "authoring", "presentation", "closed", "roadmap", "all"].includes(scope), `Unknown scope: ${scope}`);
 const cases = [
   { name: "elevated-retina", view: "3d", width: 1000, height: 700, dpr: 2 },
   { name: "plan", view: "2d", width: 1440, height: 900, dpr: 1 },
@@ -58,6 +59,7 @@ if (!process.argv.includes("--skip-build")) {
 }
 const html = `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#0f151d}</style></head><body><script src="/wasm_exec.js"></script><script>
 const go=new Go();const params=new URLSearchParams(location.search);go.argv=['studio','--preset',params.get('preset')||'banked','--view',params.get('view')||'2d'];
+for (const flag of ['mode','race-file','vehicle']) { if(params.has(flag)) go.argv.push('--'+flag,params.get(flag)); }
 go.exit=(code)=>{window.applicationExit=code};
 WebAssembly.instantiateStreaming(fetch('/studio.wasm'),go.importObject).then(r=>go.run(r.instance)).catch(e=>{window.bootError=String(e)});
 </script></body></html>`;
@@ -962,6 +964,13 @@ try {
           console.log(`${c.name}: ${name}`);
           await run(); checks.push(name);
         }, { state, wait, control, tick, near, coords, click, key, seekTimeline, artifacts, startPreset });
+      }
+      if (scope === "racecraft" || scope === "all") {
+        await startPreset(page, c, "hairpin");
+        await racecraftChecks(page, c, async (name, run) => {
+          currentCheck = name; console.log(`${c.name}: ${name}`);
+          await run(); checks.push(name);
+        }, { state, wait, control, tick, near, key, coords, seekTimeline, artifacts, startPreset });
       }
       assert.deepEqual(errors, [], "browser errors");
       const final = await state(page);

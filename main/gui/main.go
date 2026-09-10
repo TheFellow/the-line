@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/TheFellow/the-line/internal/editor"
+	"github.com/TheFellow/the-line/pkg/racecraft"
 	"github.com/TheFellow/the-line/pkg/render"
 	"github.com/TheFellow/the-line/pkg/solver"
 	"github.com/TheFellow/the-line/pkg/track"
@@ -27,6 +28,7 @@ import (
 )
 
 type options struct {
+	mode, scenario, raceFile                            string
 	preset, scene, vehicle, view, file, capture, report string
 	frames, width, height                               int
 	demo                                                bool
@@ -46,6 +48,11 @@ type solved struct {
 }
 
 type game struct {
+	raceReturnRenderer   *render.Renderer
+	race                 *racecraft.Result
+	raceReplies          chan raceReply
+	cancelRacePlan       context.CancelFunc
+	raceReturnView       string
 	authoringOpen        bool
 	importRequests       chan csvImport
 	reference            *render.Reference
@@ -102,9 +109,12 @@ type game struct {
 
 func main() {
 	var o options
+	flag.StringVar(&o.mode, "mode", "qualifying", "qualifying or racecraft")
+	flag.StringVar(&o.scenario, "scenario", "over-under", "racecraft example")
+	flag.StringVar(&o.raceFile, "race-file", "", "load race experiment (implies racecraft mode); also save/load path")
 	flag.StringVar(&o.preset, "preset", "esses", "starting corner sequence (hairpin, esses, compound, banked, rally)")
 	flag.StringVar(&o.scene, "scene", "", "load a scene JSON instead of a preset")
-	flag.StringVar(&o.vehicle, "vehicle", "", "override the scene vehicle preset")
+	flag.StringVar(&o.vehicle, "vehicle", "", "override vehicle preset in qualifying and racecraft, including a loaded experiment")
 	flag.StringVar(&o.view, "view", "3d", "initial view: 2d or 3d")
 	flag.StringVar(&o.file, "file", "scene.json", "editor save/load path; click the path to edit it")
 	flag.StringVar(&o.capture, "capture", "", "capture actual final Ebitengine Draw as PNG")
@@ -115,6 +125,9 @@ func main() {
 	flag.BoolVar(&o.demo, "demo", false, "exercise select/edit/undo/redo/save/load/view actions before capture")
 	flag.BoolVar(&o.demoDrag, "demo-drag", false, "verify pointer dragging only (use with --frames and --report)")
 	flag.Parse()
+	if o.mode != "qualifying" && o.mode != "racecraft" {
+		log.Fatal("mode must be qualifying or racecraft")
+	}
 	if o.demoDrag {
 		o.demo = true
 		demoActions = []string{"next", "next", "pointer-drag"}
@@ -170,6 +183,32 @@ func main() {
 	if err := g.rebuild(); err != nil {
 		log.Fatal(err)
 	}
+	if o.mode == "racecraft" || o.raceFile != "" {
+		e, err := racecraft.Example(o.scenario)
+		if o.raceFile != "" {
+			e, err = racecraft.Load(o.raceFile)
+		}
+		if err != nil {
+			log.Fatal(err)
+		}
+		if o.vehicle != "" {
+			e.Vehicle = v
+		}
+		result, err := racecraft.Plan(context.Background(), e.Scene, e.Vehicle, e.Config)
+		if err != nil {
+			log.Fatal(err)
+		}
+		g.raceReturnRenderer = g.renderer
+		g.race = &result
+		g.raceReturnView = o.view
+		g.resetCamera = true
+		if g.opts.view == "perspective" {
+			g.opts.view = "3d"
+		}
+		if err := g.rebuild(); err != nil {
+			log.Fatal(err)
+		}
+	}
 	g.texture = ebiten.NewImage(o.width, o.height)
 	attachInspection(g)
 	ebiten.SetWindowSize(o.width, o.height)
@@ -222,6 +261,9 @@ func (g *game) recordError(err error) {
 }
 
 func (g *game) rebuild() error {
+	if g.race != nil {
+		return g.rebuildRace()
+	}
 	if err := g.syncReference(); err != nil {
 		return err
 	}
@@ -246,6 +288,7 @@ func (g *game) rebuild() error {
 func (g *game) queueSolve(rollback func()) { g.startSolve(rollback, false) }
 
 func (g *game) Update() error {
+	g.acceptRace()
 	g.updateImport()
 	defer inspectFrame(g)
 	if g.captured {
@@ -258,7 +301,7 @@ func (g *game) Update() error {
 
 	if g.playing {
 		g.clock += g.rate / 60
-		if !g.result.Closed && g.clock > g.playbackDuration() {
+		if (g.race != nil || !g.result.Closed) && g.clock > g.playbackDuration() {
 			g.clock = math.Mod(g.clock, g.playbackDuration())
 		}
 	}
@@ -277,6 +320,9 @@ func (g *game) Update() error {
 		return nil
 	}
 	g.presentationKeys()
+	if inpututil.IsKeyJustPressed(ebiten.KeyR) && !ebiten.IsKeyPressed(ebiten.KeyControl) && !ebiten.IsKeyPressed(ebiten.KeyMeta) {
+		g.action("race-mode")
+	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		if g.drag != nil || g.manualDrag != nil || g.scrubbing || g.charting || g.cameraDrag != nil {
 			g.cancelPointer()
@@ -420,7 +466,7 @@ func (g *game) pointer(x, y float64, pressed, held, released bool) {
 			return
 		}
 	}
-	if g.opts.view == "perspective" {
+	if g.race != nil || g.opts.view == "perspective" {
 		return
 	}
 	if g.manualPointer(x, y, pressed, held, released) {
@@ -465,6 +511,9 @@ func (g *game) scrub(x int) {
 
 // action is shared by real click/key events and deterministic verification.
 func (g *game) action(key string) {
+	if g.raceAction(key) {
+		return
+	}
 	if g.presentationAction(key) || g.lapAction(key) {
 		return
 	}
@@ -759,6 +808,9 @@ func (g *game) Draw(screen *ebiten.Image) {
 		status = fmt.Sprintf("Drag handle %02d to reshape the road; release to compute the line", g.hover+1)
 	}
 	path := g.opts.file
+	if g.race != nil {
+		path = g.racePath()
+	}
 	if g.fileEditing {
 		path = g.fileDraft + "|"
 		status = "Editing save / load path · ENTER confirm · ESC cancel"

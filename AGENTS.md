@@ -5,6 +5,7 @@ Use small, idiomatic Go packages, explicit validation/errors, and standard-libra
 - `pkg/track`: versioned geometry, road sampling, persistence and track presets.
 - `pkg/vehicle`: parameters and replaceable force envelope; SI units are documented at the API.
 - `pkg/solver`: bounded deterministic optimization and time-indexed trajectories.
+- `pkg/racecraft`: open-road two-car tactical planning, complete experiment inputs and continuous body-clearance certification.
 - `pkg/render`: display-independent renderer shared by CLI exports and live GUI.
 - `internal/editor`: transactional edits and undo/redo.
 - `internal/cli`, `main/cli`, `main/gui`: command wiring and interactive presentation.

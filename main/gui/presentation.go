@@ -16,10 +16,10 @@ func (g *game) presentationKeys() {
 		prefix = "station"
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyComma) {
-		g.presentationAction(prefix + "-")
+		g.action(prefix + "-")
 	}
 	if inpututil.IsKeyJustPressed(ebiten.KeyPeriod) {
-		g.presentationAction(prefix + "+")
+		g.action(prefix + "+")
 	}
 }
 func (g *game) presentationAction(key string) bool {

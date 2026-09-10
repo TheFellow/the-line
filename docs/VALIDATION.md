@@ -245,3 +245,96 @@ node tools/browser/verify.mjs --scope=all --case=elevated-retina --artifacts=art
 go run ./tools/review --out artifacts/once-over-review
 go run ./main/cli animate --preset club-loop --vehicle gt --view perspective --duration 40 --fps 20 --width 960 --height 600 --out artifacts/once-over-review/club-loop-animation.gif
 ```
+
+## Two-car racecraft (2026-09-10)
+
+The four checked-in experiments use the existing solver with an increased road
+margin enclosing a 4.4 m × vehicle-width body. `pkg/racecraft` checks a conservative
+relative-speed bound over the full shared-time interval, recursively subdividing
+ambiguous intervals. A pair is returned only when every interval is certified;
+resolution/work-budget exhaustion rejects the pair. No interpolation between
+render frames can bypass that check.
+
+Default outcomes are recorded in [RACECRAFT.md](RACECRAFT.md): the over-under ends
+with B ahead, the pass/repass restores A's lead, defence holds with a larger gap,
+and the esses demonstrate trading nose-ahead advantage without a completed pass.
+Independent tests verify segment kinematics and force limits, exact planar
+segment-to-segment body clearance against all road edges, dense car-to-car
+clearance, deterministic replay, an occupied-line fallback, changed outcomes,
+input errors, cancellation, persistence and failed-export preservation. The
+between-frame collision fixture crosses two cars inside a 10 ms interval despite
+safe interval endpoints.
+
+The focused real Ebitengine browser checks passed at 1000×700 / DPR 2 and
+1440×900 / DPR 1. They exercise entering/exiting racecraft, preserving the
+qualifying scene and trajectory, gap/overspeed/separation controls, safe rejection,
+complete experiment save/load, scenario changes, shared timeline scrubbing,
+keyboard frame stepping, restart and both views. Captures
+`artifacts/browser/elevated-retina-race-repass.png` and
+`artifacts/browser/plan-race-over-under.png` were visually inspected.
+
+`go run ./tools/preview` generates the public GIF from the normal qualifying and
+racecraft CLI exports. The 391-frame, 960×600 result contains qualifying on Club
+Loop, an over-under in plan view and a pass/repass in elevated view. Decoded
+composited frames from all three clips were visually inspected. Transparent
+unchanged pixels reduce the combined preview to approximately 1.5 MiB without
+adding an external animation tool dependency.
+
+Final Go validation passed: `go test ./...`, `go vet ./...`, and `make build`.
+A `CGO_ENABLED=0` CLI build also exported the pass/repass CSV successfully. After
+chart rescaling and save-path presentation updates, the focused browser suite
+passed again in both viewports (six workflow checks total), recorded in
+`artifacts/browser-race-final/report.json`. A 40 m starting-gap export was also
+visually inspected to verify the adaptive position-chart scale.
+
+The complete `make verify-headless` run passed all **86 workflow checks**:
+43 at 1000×700 / DPR 2 and 43 at 1440×900 / DPR 1. The final
+`artifacts/browser/report.json` has no failed cases or browser errors. Both final
+racecraft captures were inspected. This exercises the actual Ebitengine renderer
+and real mouse/keyboard input without opening desktop windows.
+
+## Independent racecraft critique follow-up (2026-09-10)
+
+The [research brief](../research/RACECRAFT_IMPLEMENTATION.md) was reviewed against
+source through the Claude CLI. Its [verbatim critique](../research/CLAUDE_RACECRAFT_CRITIQUE.md)
+and [finding-by-finding response](../research/RACECRAFT_CRITIQUE_RESPONSE.md) record
+what was inspected, what was reproduced, and how fresh implementation agents
+addressed the findings in focused commits.
+
+After the fixes, `go test ./...`, `go vet ./...` and `make build` passed. A
+`CGO_ENABLED=0` CLI build exported pass/repass CSV. Added tests cover zero and
+fractional entry caps, meaningful failure causes, road-distance placements on
+nonuniform geometry, all three vehicle presets on a custom banked road,
+first-finish behavior, the certified lower-bound property, analytic pass/repass
+thresholds, tangent contact, interval-budget exhaustion and failed/aliased exports.
+The cap and station-placement regressions were checked against the old code and
+failed for their intended reasons.
+
+The final actual Ebitengine browser runs passed **26 workflow checks** with no
+browser errors: **20 racecraft** checks and **six authoring** checks across
+1000×700 / DPR 2 and 1440×900 / DPR 1. They cover ordinary controls and save/load,
+failed-load and failed-plan preservation, held gesture cancellation, perspective
+return, delayed CSV reads across mode boundaries, custom example replacement,
+cancelling a pending plan, startup flag interactions, normal CSV import, rejected
+imports and undo/redo preservation. Reports are retained at:
+
+- `artifacts/browser-racecraft-review-final/report.json`
+- `artifacts/browser-authoring-review-final/report.json`
+
+The final elevated pass/repass, plan over-under and both CSV import captures were
+inspected. These post-review runs target the modified workflows; the 86-check
+full pre-review baseline above remains separate evidence.
+
+The README animation was regenerated with `go run ./tools/preview`, decoded and
+visually inspected across all three clips: **391 frames, 960×600, 1,601,432 bytes**.
+Both standalone PNG views were inspected, including 6.25 m separation precision.
+The corrected station mapping retains the intended pass/repass outcomes but
+changes timing; current measurements and the 11 m no-pass gap fixture are in
+[RACECRAFT.md](RACECRAFT.md).
+
+Reproduce the focused browser checks without desktop windows:
+
+```sh
+node tools/browser/verify.mjs --scope=racecraft --artifacts=artifacts/browser-racecraft-review-final
+node tools/browser/verify.mjs --scope=authoring --artifacts=artifacts/browser-authoring-review-final
+```
