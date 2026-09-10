@@ -16,6 +16,7 @@ func (e evaluator) geometry(offset []float64) ([]pathState, error) {
 	for i, s := range e.road {
 		points[i] = s.AtOffset(offset[i])
 	}
+	kerbGrip := segmentKerbGrip(e.road, points, e.clearance)
 	for i := 1; i < n-1; i++ {
 		a, b, c := points[i-1], points[i], points[i+1]
 		ab := math.Hypot(b.X-a.X, b.Y-a.Y)
@@ -59,6 +60,7 @@ func (e evaluator) geometry(offset []float64) ([]pathState, error) {
 			end := b
 			end.Grip = a.Grip
 			path[len(path)-1].grip = min(a.GripAcross(offset[i], e.clearance), end.GripAcross(offset[i+1], e.clearance))
+			path[len(path)-1].grip = min(path[len(path)-1].grip, kerbGrip[i])
 		}
 		// The line lies in the convex, clearance-inset cell. Its height follows the
 		// same two authoritative triangles as the renderer, including warped banks.
