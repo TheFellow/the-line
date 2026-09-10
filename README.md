@@ -57,7 +57,7 @@ Click the file path to edit it, use Cmd/Ctrl+A to clear it, and Enter to confirm
 ./bin/the-line animate --preset rally --view 3d --width 960 --height 600 --fps 20 --out rally.gif
 ```
 
-`--spacing` controls road discretization; `--iterations` controls the finite search budget. `--margin` adds clearance beyond half the vehicle width. Use `--vehicle-file car.json` to supply a custom vehicle configuration. `--help` on each command lists its options. JSON exports include the scene, vehicle and complete solver result; CSV exports include distance, time, position, speed, curvature, lateral offset and acceleration.
+`--spacing` controls search discretization; the selected candidates and baseline are re-evaluated at 0.5 m or finer before export. `--iterations` controls the finite search budget. `--margin` adds clearance beyond half the vehicle width. Use `--vehicle-file car.json` to supply a custom vehicle configuration. `--help` on each command lists its options. JSON exports include the scene, vehicle and complete solver result; CSV exports include distance, time, position, speed, curvature, lateral offset and acceleration.
 
 The bundled tracks are `hairpin`, `esses`, `compound`, `banked` and `rally`. Their geometry and vehicle presets are fictional, designed for exploration. The rally sequence transitions from asphalt through gravel to dirt. Surfaces are categorical: the solver anticipates reduced grip when braking instead of simply recolouring the road.
 
@@ -96,5 +96,7 @@ make verify
 ./bin/the-line-studio --demo --frames 240 --file artifacts/edited.json \
   --capture artifacts/editor.png --report artifacts/editor-report.json
 ```
+
+Measured solver accuracy, native frame rates, and verification commands are recorded in [docs/VALIDATION.md](docs/VALIDATION.md).
 
 The independent pre-implementation research review lives in [research/CRITIQUE.md](research/CRITIQUE.md), alongside [sources and design rationale](research/README.md). The public packages separate `track`, `vehicle`, `solver` and `render`; `internal/editor` owns transactional editing and `internal/cli` owns commands. Executable wiring is under `main/cli` and `main/gui`.
