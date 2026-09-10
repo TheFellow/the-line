@@ -5,6 +5,7 @@ package racecraft
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 
@@ -127,6 +128,7 @@ func Plan(ctx context.Context, scene track.Scene, v vehicle.Config, c Config) (R
 		return Result{}, fmt.Errorf("starting gap exceeds the road length")
 	}
 	r := Result{Config: c, Scene: scene, Vehicle: v, Events: []Event{}}
+	var failures []error
 	// Prefer the requested line, then try progressively wider space-giving lines.
 	for _, variant := range []float64{0, .25, .5} {
 		if err := ctx.Err(); err != nil {
@@ -135,9 +137,15 @@ func Plan(ctx context.Context, scene track.Scene, v vehicle.Config, c Config) (R
 		r.Candidates++
 		valid := true
 		for car := 0; car < 2; car++ {
-			controls, intent := placements(c, car, variant, len(road))
+			controls, intent, e := placements(c, car, variant, len(road))
+			if e != nil {
+				failures = append(failures, fmt.Errorf("candidate %d car %s placements: %w", r.Candidates, []string{"A", "B"}[car], e))
+				valid = false
+				break
+			}
 			offsets, e := solver.ManualOffsets(road, controls, radius+.25)
 			if e != nil {
+				failures = append(failures, fmt.Errorf("candidate %d car %s road fit: %w", r.Candidates, []string{"A", "B"}[car], e))
 				valid = false
 				break
 			}
@@ -155,6 +163,7 @@ func Plan(ctx context.Context, scene track.Scene, v vehicle.Config, c Config) (R
 				if ctx.Err() != nil {
 					return Result{}, ctx.Err()
 				}
+				failures = append(failures, fmt.Errorf("candidate %d car %s solver feasibility: %w", r.Candidates, []string{"A", "B"}[car], e))
 				valid = false
 				break
 			}
@@ -174,16 +183,17 @@ func Plan(ctx context.Context, scene track.Scene, v vehicle.Config, c Config) (R
 			return Result{}, ctx.Err()
 		}
 		if !ok {
+			failures = append(failures, fmt.Errorf("candidate %d body-clearance certification failed: possible collision or unresolved clearance", r.Candidates))
 			continue
 		}
 		r.MinClearance = clearance
 		r.Events = events(r)
 		return r, nil
 	}
-	return Result{}, fmt.Errorf("no collision-free plan for these placements; increase gap or separation, or reduce overspeed/clearance")
+	return Result{}, fmt.Errorf("no feasible racecraft plan: %w", errors.Join(failures...))
 }
 
-func placements(c Config, car int, variant float64, count int) ([]solver.LineControl, string) {
+func placements(c Config, car int, variant float64, count int) ([]solver.LineControl, string, error) {
 	// Fractions describe approach, rotation and exit on the example road.
 	f := []float64{0, .25, .4, .52, .64, .78, 1}
 	a := c.Separation / 2
@@ -226,6 +236,8 @@ func placements(c Config, car int, variant float64, count int) ([]solver.LineCon
 			values = []float64{-a, -a, -a, -a, -a, -a, -a}
 			intent = "Trade position at next bend"
 		}
+	default:
+		return nil, "", fmt.Errorf("unknown racecraft placements for scenario %q", c.Scenario)
 	}
 	// If the preferred crossing is occupied, delay B's lateral transition
 	// as well as giving a little more room. The full speed profile is reevaluated.
@@ -239,9 +251,13 @@ func placements(c Config, car int, variant float64, count int) ([]solver.LineCon
 		if car == 1 {
 			v += math.Copysign(variant, v)
 		}
-		out[i] = solver.LineControl{Index: int(math.Round(f[i] * float64(count-1))), Offset: v}
+		index := int(math.Round(f[i] * float64(count-1)))
+		if i > 0 && index <= out[i-1].Index {
+			return nil, "", fmt.Errorf("road length is too short for distinct tactical controls at this sampling resolution")
+		}
+		out[i] = solver.LineControl{Index: index, Offset: v}
 	}
-	return out, intent
+	return out, intent, nil
 }
 
 func (r Result) At(t float64) [2]solver.Node {

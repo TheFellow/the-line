@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/TheFellow/the-line/pkg/racecraft"
@@ -246,6 +247,45 @@ func TestEntrySpeedCaps(t *testing.T) {
 			}
 			if r.At(0)[1].Speed > tc.wantB+1e-9 {
 				t.Errorf("B starts above its effective cap: %g > %g", r.At(0)[1].Speed, tc.wantB)
+			}
+		})
+	}
+}
+
+func TestPlanningFailureCauses(t *testing.T) {
+	for _, tc := range []struct {
+		name, want string
+		edit       func(*track.Scene, *racecraft.Config)
+	}{
+		{"wide placement", "road fit", func(s *track.Scene, c *racecraft.Config) { c.Separation = 6.75 }},
+		{"narrow road", "vehicle clearance", func(s *track.Scene, c *racecraft.Config) {
+			s.Points = []track.Point{{Width: 4, Surface: "asphalt"}, {X: 200, Width: 4, Surface: "asphalt"}}
+		}},
+		{"short road", "road length", func(s *track.Scene, c *racecraft.Config) {
+			s.Points = []track.Point{{Width: 20, Surface: "asphalt"}, {X: 8, Width: 20, Surface: "asphalt"}}
+			c.Gap = 0
+		}},
+		{"infeasible bank", "stationary grip", func(s *track.Scene, c *racecraft.Config) {
+			s.Points = []track.Point{{Width: 20, Surface: "ice", Bank: 20}, {X: 200, Width: 20, Surface: "ice", Bank: 20}}
+		}},
+		{"initial overlap", "body-clearance certification", func(s *track.Scene, c *racecraft.Config) {
+			c.Gap, c.Separation = 0, 2
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _ := racecraft.Scene("over-under")
+			v, _ := vehicle.Preset("road")
+			c := racecraft.DefaultConfig("over-under")
+			tc.edit(&s, &c)
+			_, err := racecraft.Plan(context.Background(), s, v, c)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("got %v, want cause %q", err, tc.want)
+			}
+			if tc.name != "initial overlap" && strings.Contains(err.Error(), "collision") {
+				t.Fatalf("non-collision failure misattributed: %v", err)
+			}
+			if tc.name == "infeasible bank" && !strings.Contains(err.Error(), "solver feasibility") {
+				t.Fatalf("missing solver context: %v", err)
 			}
 		})
 	}
