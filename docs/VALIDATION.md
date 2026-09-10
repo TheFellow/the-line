@@ -286,3 +286,9 @@ chart rescaling and save-path presentation updates, the focused browser suite
 passed again in both viewports (six workflow checks total), recorded in
 `artifacts/browser-race-final/report.json`. A 40 m starting-gap export was also
 visually inspected to verify the adaptive position-chart scale.
+
+The complete `make verify-headless` run passed all **86 workflow checks**:
+43 at 1000×700 / DPR 2 and 43 at 1440×900 / DPR 1. The final
+`artifacts/browser/report.json` has no failed cases or browser errors. Both final
+racecraft captures were inspected. This exercises the actual Ebitengine renderer
+and real mouse/keyboard input without opening desktop windows.
