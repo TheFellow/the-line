@@ -61,6 +61,14 @@ is saved. A stale pin rejects the comparison export and preserves any existing
 output file. PNG and GIF exports restore the same pin; a stale pin is labeled
 and its ghost is hidden.
 
+For a closed scene, `animate` defaults to one complete current-car lap starting
+at `--time`. An explicit `--duration` can span multiple laps, and `--time` can
+start on any later lap. Each car retains its own lap clock across the seam. For
+example, `--preset club-loop --time 30 --duration 45` exports 45 seconds starting
+at elapsed time 30 seconds. Open sequences still stop at the last visible car's
+finish and reject start times at or after it. All exports retain the frame and
+pixel memory limits; reduce resolution or frame rate for long animations.
+
 Manual interpolation uses the solver's bounded latent C2 cubic. Vehicle clearance
 is the existing circular centre margin; evaluation retains the model's force and
 surface checks. The authoring tool does not add steering dynamics, slip, or a
