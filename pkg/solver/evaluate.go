@@ -69,7 +69,7 @@ func EvaluateContext(ctx context.Context, scene track.Scene, model vehicle.Model
 		offsets = interpolateOffsets(road, offsets, fine, clearance)
 		road = fine
 	}
-	eval := evaluator{ctx: ctx, road: road, model: model, entry: scene.EntrySpeed, exit: scene.ExitSpeed, clearance: clearance}
+	eval := evaluator{ctx: ctx, road: road, model: model, entry: scene.EntrySpeed, exit: scene.ExitSpeed, clearance: clearance, edges: indexRoadEdges(road, clearance)}
 	result, err := eval.run(offsets)
 	if err != nil {
 		return Result{}, err

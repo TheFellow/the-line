@@ -6,62 +6,76 @@ import (
 	"github.com/TheFellow/the-line/pkg/track"
 )
 
-type kerbEdge struct {
+type roadEdge struct {
 	a, b track.Vec3
 	grip float64
 }
 
-// segmentKerbGrip measures circular-footprint contact with the actual asphalt
-// edges, including neighboring road cells. A cross-section offset alone misses
-// contact where width tapers or the path approaches an edge obliquely. The grid
-// keeps this geometric check local even on long, finely sampled laps.
-// The existing profile's minimum-adjacent-grip rule remains conservative at
-// categorical surface boundaries. Excluded kerbs never affect the force model.
-func segmentKerbGrip(road []track.Sample, points []track.Vec3, radius float64) []float64 {
-	if !road[0].KerbsCountAsRoad {
-		return nil
+// edgeGrid indexes side segments in plan. Both legal-boundary clearance and
+// asphalt/kerb contact query the same exact circular swept-footprint geometry.
+type edgeGrid struct {
+	cellSize float64
+	cells    map[[2]int][]roadEdge
+}
+
+func (g edgeGrid) bounds(a, b track.Vec3, pad float64) (int, int, int, int) {
+	return int(math.Floor((min(a.X, b.X) - pad) / g.cellSize)), int(math.Floor((max(a.X, b.X) + pad) / g.cellSize)),
+		int(math.Floor((min(a.Y, b.Y) - pad) / g.cellSize)), int(math.Floor((max(a.Y, b.Y) + pad) / g.cellSize))
+}
+
+func (g edgeGrid) add(edge roadEdge) {
+	x0, x1, y0, y1 := g.bounds(edge.a, edge.b, 0)
+	for x := x0; x <= x1; x++ {
+		for y := y0; y <= y1; y++ {
+			g.cells[[2]int{x, y}] = append(g.cells[[2]int{x, y}], edge)
+		}
 	}
-	cellSize := math.Max(2, 2*radius)
-	grid := make(map[[2]int][]kerbEdge)
-	bounds := func(a, b track.Vec3, pad float64) (int, int, int, int) {
-		return int(math.Floor((min(a.X, b.X) - pad) / cellSize)), int(math.Floor((max(a.X, b.X) + pad) / cellSize)),
-			int(math.Floor((min(a.Y, b.Y) - pad) / cellSize)), int(math.Floor((max(a.Y, b.Y) + pad) / cellSize))
+}
+
+func (g edgeGrid) contactGrip(a, b track.Vec3, radius float64) float64 {
+	grip := math.Inf(1)
+	x0, x1, y0, y1 := g.bounds(a, b, radius)
+	for x := x0; x <= x1; x++ {
+		for y := y0; y <= y1; y++ {
+			for _, edge := range g.cells[[2]int{x, y}] {
+				if edge.grip < grip && segmentsNear(a, b, edge.a, edge.b, radius) {
+					grip = edge.grip
+				}
+			}
+		}
 	}
+	return grip
+}
+
+type roadEdges struct{ legal, kerbs edgeGrid }
+
+func indexRoadEdges(road []track.Sample, radius float64) *roadEdges {
+	newGrid := func() edgeGrid { return edgeGrid{math.Max(2, 2*radius), make(map[[2]int][]roadEdge)} }
+	out := &roadEdges{newGrid(), newGrid()}
 	for i := 0; i < len(road)-1; i++ {
 		a, b := road[i], road[i+1]
 		for _, side := range []float64{-1, 1} {
+			out.legal.add(roadEdge{a.AtOffset(a.EdgeOffset(side)), b.AtOffset(b.EdgeOffset(side)), 0})
+			if !a.KerbsCountAsRoad {
+				continue
+			}
 			ak, bk, aw, bw := a.KerbLeft, b.KerbLeft, a.LeftWidth(), b.LeftWidth()
 			if side < 0 {
 				ak, bk, aw, bw = a.KerbRight, b.KerbRight, a.RightWidth(), b.RightWidth()
 			}
-			if ak.Width == 0 && bk.Width == 0 {
-				continue
+			grip := math.Inf(1)
+			if ak.Width > 0 {
+				grip = ak.Friction()
 			}
-			edge := kerbEdge{a.AtOffset(side * aw), b.AtOffset(side * bw), min(ak.Friction(), bk.Friction())}
-			x0, x1, y0, y1 := bounds(edge.a, edge.b, 0)
-			for x := x0; x <= x1; x++ {
-				for y := y0; y <= y1; y++ {
-					grid[[2]int{x, y}] = append(grid[[2]int{x, y}], edge)
-				}
+			if bk.Width > 0 {
+				grip = min(grip, bk.Friction())
 			}
-		}
-	}
-	grips := make([]float64, len(points)-1)
-	for i := range grips {
-		grips[i] = math.Inf(1)
-		a, b := points[i], points[i+1]
-		x0, x1, y0, y1 := bounds(a, b, radius)
-		for x := x0; x <= x1; x++ {
-			for y := y0; y <= y1; y++ {
-				for _, edge := range grid[[2]int{x, y}] {
-					if edge.grip < grips[i] && segmentsNear(a, b, edge.a, edge.b, radius) {
-						grips[i] = edge.grip
-					}
-				}
+			if !math.IsInf(grip, 1) {
+				out.kerbs.add(roadEdge{a.AtOffset(side * aw), b.AtOffset(side * bw), grip})
 			}
 		}
 	}
-	return grips
+	return out
 }
 
 func segmentsNear(a, b, c, d track.Vec3, radius float64) bool {

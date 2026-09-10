@@ -14,7 +14,9 @@ offset and force state match exactly across that seam. The endpoint force state
 is the outgoing state of the next lap, rather than an open-road stopping state.
 
 Speed propagation is cyclic: each forward/backward pass identifies the duplicated
-seam speed and propagates reductions around the loop until convergence. The same
+seam speed and propagates reductions around the loop until the maximum speed
+change is below 1e-6 m/s, with a bound of 40 passes. A lap that does not converge
+returns an explicit error; it is never exported as a converged result. The same
 40-pass bound and dense segment-force verification apply. Search bumps wrap at
 the seam, and coarse offsets refine through a periodic latent cubic. Supplied
 and manual offsets must have identical first and final values. Geometry and

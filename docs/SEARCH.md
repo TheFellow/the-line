@@ -62,3 +62,11 @@ Run benchmarks without other solves or graphical checks for comparable timing.
 Go's profile command may also write `solver.test` into the current directory;
 remove that generated binary afterwards. The measured results and remaining
 interactive latency limits are recorded in [VALIDATION.md](VALIDATION.md).
+
+`candidates` counts actual path-profile evaluations, including supplied-line and
+baseline work during seed verification. A verified seed is retained directly,
+rather than evaluated again as a fine shortlist entry. A `solver.SeedError`
+identifies a rejected warm start; the GUI retries only that failure without the
+seed. Other failures return immediately. When a provisional line survives a
+search, its displayed iteration and candidate counts describe the search that
+was actually completed.

@@ -127,7 +127,7 @@ func SolveContext(ctx context.Context, scene track.Scene, model vehicle.Model, o
 			return Result{}, fmt.Errorf("road at %.1f m is narrower than vehicle and clearance", s.S)
 		}
 	}
-	eval := evaluator{ctx: ctx, road: road, model: model, entry: scene.EntrySpeed, exit: scene.ExitSpeed, clearance: clearance}
+	eval := evaluator{ctx: ctx, road: road, model: model, entry: scene.EntrySpeed, exit: scene.ExitSpeed, clearance: clearance, edges: indexRoadEdges(road, clearance)}
 	offsets := make([]float64, n)
 	best, err := eval.run(offsets)
 	if err != nil {
@@ -145,20 +145,22 @@ func SolveContext(ctx context.Context, scene track.Scene, model vehicle.Model, o
 	if opts.Seed != nil {
 		r, err := EvaluateContext(ctx, scene, model, opts.Seed, opts)
 		if err != nil {
-			return Result{}, fmt.Errorf("seed: %w", err)
+			return Result{}, &SeedError{Err: err}
 		}
 		seedResult = &r
+		count += r.Candidates
 		seeded, err := eval.run(opts.Seed)
 		if err != nil {
-			return Result{}, fmt.Errorf("seed: %w", err)
+			return Result{}, &SeedError{Err: err}
 		}
+		count++
 		seedCoarseDuration = seeded.Duration
 		if seeded.Duration < best.Duration {
 			best = seeded
 			copy(offsets, opts.Seed)
 		}
-		incumbents = append(incumbents, append([]float64(nil), opts.Seed...))
-		incumbentDurations = append(incumbentDurations, seeded.Duration)
+		// The verified seed is retained separately; do not evaluate it again
+		// as a fine shortlist entry.
 	}
 	accept := func(candidate []float64) bool {
 		count++
@@ -273,6 +275,7 @@ func SolveContext(ctx context.Context, scene track.Scene, model vehicle.Model, o
 		}
 		refined := eval
 		refined.road = fine
+		refined.edges = indexRoadEdges(fine, clearance)
 		baseline, err = refined.run(make([]float64, len(fine)))
 		if err != nil {
 			return Result{}, fmt.Errorf("refined centreline infeasible: %w", err)
@@ -350,6 +353,7 @@ type pathState struct {
 	bank, grip float64
 }
 type evaluator struct {
+	edges                  *roadEdges
 	ctx                    context.Context
 	road                   []track.Sample
 	model                  vehicle.Model
