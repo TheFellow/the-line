@@ -16,6 +16,9 @@ func runImport(args []string, stdout, stderr io.Writer) error {
 	out := f.String("out", "", "output scene JSON file")
 	name := f.String("name", "Imported centreline", "scene name; credit source in your study")
 	if err := f.Parse(args); err != nil {
+		if err == flag.ErrHelp {
+			return nil
+		}
 		return err
 	}
 	if f.NArg() != 0 || *csvPath == "" || *out == "" {

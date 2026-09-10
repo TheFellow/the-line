@@ -10,8 +10,10 @@ A geometry, bank, width or surface change marks a pin **stale · different road*
 Its source remains saved, but ghost playback and station comparisons are disabled
 until that road is restored or a new pin is chosen. Renaming a scene, changing a
 car or changing the speed caps does not change physical-road identity. Different
-caps and realized entry speeds can affect comparisons; these are cap-constrained
-model estimates, not equal-entry-state lap claims.
+caps and realized entry speeds can affect open-sequence comparisons. Closed laps
+ignore endpoint caps and solve periodic speed profiles; each animated car wraps
+at its own lap time. Station comparisons always describe one traversal of the
+same physical road.
 
 Click **Author line** to display sparse cyan diamond handles. The first authored
 line follows the centreline and has exactly the baseline's evaluated time. Drag a
@@ -38,7 +40,30 @@ keyed by the visible path; that storage is separate from native files. The examp
 [`manual-study.json`](../examples/manual-study.json) contains an authored centreline
 and its named reference on a short fictional sequence.
 
+CLI exports use a compatible saved manual line automatically. `--line manual`
+requires one; `--line optimized` runs a fresh search even when the scene contains
+an authored line. A stale manual line produces an error with the default `auto`
+selection, so geometry changes cannot silently export a different hypothesis.
+Manual evaluation uses its saved sampling spacing. All three commands share
+this selection behavior:
+
+```sh
+./bin/the-line solve --scene examples/manual-study.json --line manual --out artifacts/manual.json
+./bin/the-line render --scene examples/manual-study.json --view perspective --out artifacts/manual.png
+./bin/the-line animate --scene examples/manual-study.json --view 3d --out artifacts/manual.gif
+./bin/the-line solve --scene examples/manual-study.json --line optimized --format comparison-csv --out artifacts/comparison.csv
+```
+
+`comparison-csv` aligns current and reference times, path distances, positions,
+speeds and force telemetry at shared road stations. It restores a saved pin with
+its original vehicle and caps, or uses the current car's centreline when no pin
+is saved. A stale pin rejects the comparison export and preserves any existing
+output file. PNG and GIF exports restore the same pin; a stale pin is labeled
+and its ghost is hidden.
+
 Manual interpolation uses the solver's bounded latent C2 cubic. Vehicle clearance
 is the existing circular centre margin; evaluation retains the model's force and
 surface checks. The authoring tool does not add steering dynamics, slip, or a
-calibrated driver model. These remain open-sequence, heuristic model estimates.
+calibrated driver model. These remain heuristic quasi-static estimates for open
+sequences or steady closed laps; see [closed laps](CLOSED_LAPS.md) for the seam
+and periodic-profile assumptions.
