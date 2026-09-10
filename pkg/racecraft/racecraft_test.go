@@ -32,6 +32,7 @@ func TestExamples(t *testing.T) {
 			if string(a) != string(b) {
 				t.Fatal("nondeterministic replay")
 			}
+			checkFirstFinish(t, r)
 			if r.MinClearance < c.Clearance {
 				t.Fatal("uncertified clearance")
 			}
@@ -42,6 +43,9 @@ func TestExamples(t *testing.T) {
 			for tm := 0.; tm < r.Duration; tm += .0037 {
 				n := r.At(tm)
 				d := math.Hypot(n[0].Position.X-n[1].Position.X, n[0].Position.Y-n[1].Position.Y)
+				if r.MinClearance > d-r.Cars[0].Radius-r.Cars[1].Radius+1e-9 {
+					t.Fatal("certified lower bound exceeds sampled body clearance")
+				}
 				if d < r.Cars[0].Radius+r.Cars[1].Radius+c.Clearance {
 					t.Fatalf("body overlap at %g", tm)
 				}
@@ -286,6 +290,76 @@ func TestPlanningFailureCauses(t *testing.T) {
 			}
 			if tc.name == "infeasible bank" && !strings.Contains(err.Error(), "solver feasibility") {
 				t.Fatalf("missing solver context: %v", err)
+			}
+		})
+	}
+}
+
+func checkFirstFinish(t *testing.T, r racecraft.Result) {
+	t.Helper()
+	end := r.At(r.Duration)
+	before := r.At(r.Duration - 1e-4)
+	finished := 0
+	for i, car := range r.Cars {
+		last := car.Path.Nodes[len(car.Path.Nodes)-1]
+		if math.Abs(end[i].Station-last.Station) < 1e-8 {
+			finished++
+		}
+		if before[i].Station >= last.Station {
+			t.Fatalf("car %d finished before the shared end", i)
+		}
+		if r.Duration+car.StartTime < car.Path.Duration-1e-8 && end[i].Station >= last.Station {
+			t.Fatalf("car %d parked at its endpoint before finishing", i)
+		}
+	}
+	if finished == 0 {
+		t.Fatal("neither car finished at the shared end")
+	}
+	if got := r.At(r.Duration + 10); got != end {
+		t.Fatal("replay continues past its certified first finish")
+	}
+	distance := math.Hypot(end[0].Position.X-end[1].Position.X, end[0].Position.Y-end[1].Position.Y)
+	if r.MinClearance > distance-r.Cars[0].Radius-r.Cars[1].Radius+1e-9 {
+		t.Fatal("certified lower bound exceeds finish body clearance")
+	}
+}
+
+func TestCustomBankedNonuniformRoadAndVehicles(t *testing.T) {
+	s := track.Scene{Version: 1, Name: "Banked custom straight", EntrySpeed: 20, ExitSpeed: 35}
+	for x := 0.; x <= 30; x++ {
+		s.Points = append(s.Points, track.Point{X: x, Width: 20, Bank: 5, Surface: "asphalt"})
+	}
+	s.Points = append(s.Points, track.Point{X: 203, Width: 20, Bank: 5, Surface: "asphalt"})
+	for _, name := range vehicle.Presets() {
+		t.Run(name, func(t *testing.T) {
+			v, err := vehicle.Preset(name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			c := racecraft.DefaultConfig("defend")
+			r, err := racecraft.Plan(context.Background(), s, v, c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			checkFirstFinish(t, r)
+			start := r.At(0)
+			if math.Abs(start[0].Station-start[1].Station-c.Gap) > 1e-8 {
+				t.Fatal("custom road changed initial gap")
+			}
+			// The retained scene cap applies at station zero. A has already
+			// accelerated over the gap when the shared experiment starts.
+			if start[0].Speed <= s.EntrySpeed || start[1].Speed > s.EntrySpeed+1e-9 {
+				t.Fatalf("unexpected shared start speeds: A=%g B=%g", start[0].Speed, start[1].Speed)
+			}
+			for tm := 0.; tm <= r.Duration; tm = math.Min(tm+.007, r.Duration) {
+				n := r.At(tm)
+				gap := math.Hypot(n[0].Position.X-n[1].Position.X, n[0].Position.Y-n[1].Position.Y) - r.Cars[0].Radius - r.Cars[1].Radius
+				if gap < c.Clearance || r.MinClearance > gap+1e-9 {
+					t.Fatalf("invalid certified clearance at %g: certified=%g sampled=%g", tm, r.MinClearance, gap)
+				}
+				if tm == r.Duration {
+					break
+				}
 			}
 		})
 	}

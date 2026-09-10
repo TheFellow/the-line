@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 
 	"github.com/TheFellow/the-line/pkg/solver"
 	"github.com/TheFellow/the-line/pkg/track"
@@ -137,7 +138,7 @@ func Plan(ctx context.Context, scene track.Scene, v vehicle.Config, c Config) (R
 		r.Candidates++
 		valid := true
 		for car := 0; car < 2; car++ {
-			controls, intent, e := placements(c, car, variant, len(road))
+			controls, intent, e := placements(c, car, variant, road)
 			if e != nil {
 				failures = append(failures, fmt.Errorf("candidate %d car %s placements: %w", r.Candidates, []string{"A", "B"}[car], e))
 				valid = false
@@ -193,8 +194,8 @@ func Plan(ctx context.Context, scene track.Scene, v vehicle.Config, c Config) (R
 	return Result{}, fmt.Errorf("no feasible racecraft plan: %w", errors.Join(failures...))
 }
 
-func placements(c Config, car int, variant float64, count int) ([]solver.LineControl, string, error) {
-	// Fractions describe approach, rotation and exit on the example road.
+func placements(c Config, car int, variant float64, road []track.Sample) ([]solver.LineControl, string, error) {
+	// Fractions describe approach, rotation and exit in road station distance.
 	f := []float64{0, .25, .4, .52, .64, .78, 1}
 	a := c.Separation / 2
 	var values []float64
@@ -245,13 +246,22 @@ func placements(c Config, car int, variant float64, count int) ([]solver.LineCon
 		f[3] += variant * .08
 		f[4] += variant * .08
 	}
+	if len(road) < 2 {
+		return nil, "", fmt.Errorf("road length requires at least two samples for tactical controls")
+	}
 	out := make([]solver.LineControl, len(f))
 	for i := range f {
 		v := values[i]
 		if car == 1 {
 			v += math.Copysign(variant, v)
 		}
-		index := int(math.Round(f[i] * float64(count-1)))
+		station := road[0].S + f[i]*(road[len(road)-1].S-road[0].S)
+		index := sort.Search(len(road), func(j int) bool { return road[j].S >= station })
+		if index == len(road) {
+			index--
+		} else if index > 0 && station-road[index-1].S < road[index].S-station {
+			index--
+		}
 		if i > 0 && index <= out[i-1].Index {
 			return nil, "", fmt.Errorf("road length is too short for distinct tactical controls at this sampling resolution")
 		}
