@@ -84,7 +84,7 @@ func TestAddDeleteMoveSaveLoad(t *testing.T) {
 	if err := e.Save(path); err != nil {
 		t.Fatal(err)
 	}
-	saved := e.Scene()
+	saved := track.Migrate(e.Scene())
 	if err := e.DeletePoint(index); err != nil {
 		t.Fatal(err)
 	}
