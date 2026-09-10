@@ -109,3 +109,24 @@ The proposed “one local speed minimum per corner” criterion is **not achieve
 `go test ./pkg/track ./pkg/solver ./internal/verification -count=1 -v` passed. Optimized same-path refinement now stays below 0.045% on every supplied preset, and the regression threshold is tightened to 1%. The full measured table above supersedes the initial release figures.
 
 The integration review rendered every preset in both views with the GT using `go run ./tools/review -out artifacts/iteration1-review`. All ten images in `artifacts/iteration1-review/gallery.png` were visually inspected: smooth road joins, line/car alignment with the ribbon, readable station charts and surface transitions. This matrix uses a single fixed GT configuration; the numerical fixture table uses each preset's default vehicle. Native windows were not opened.
+
+## Iteration 4: authored studies and pinned references (2026-09-10)
+
+`go test ./pkg/render ./internal/editor ./pkg/solver -run 'TestPinned|TestManual' -count=1`
+passed. These checks independently assert zero authored offsets reproduce the
+centreline time exactly, constant-offset interpolation, lateral dragging along
+banked cross-sections at multiple camera angles/scales with an off-centre grab,
+immutable pinned node snapshots, exact reference duration after serialization
+reconstruction, exit station delta equal to the duration difference, and rejection
+of station/ghost comparison on changed geometry. Track persistence tests also check
+deep copies, inline study roundtrips, road-identity exclusions and nested-reference
+rejection. The actual browser gesture/storage scenarios are in
+`tools/browser/manual.mjs`; their final results are recorded with the integrated
+headless suite below.
+
+Rendered and visually inspected `artifacts/study-2d.png` and `study-3d.png`: cyan
+lateral handles follow the banked road, authoring controls and A/B names/times are
+visible, the independent pinned ghost and same-station traces agree, and the
+centreline manual run remains visibly slower than the pinned optimized esses run
+(15.85 versus 14.24 seconds in this fixture). These screenshots establish
+presentation, not calibration against a real vehicle.

@@ -119,3 +119,9 @@ Measured solver accuracy, native frame rates, and verification commands are reco
 The independent pre-implementation research review lives in [research/CRITIQUE.md](research/CRITIQUE.md), alongside [sources and design rationale](research/README.md). The public packages separate `track`, `vehicle`, `solver` and `render`; `internal/editor` owns transactional editing and `internal/cli` owns commands. Executable wiring is under `main/cli` and `main/gui`.
 
 The [fresh enthusiast review](docs/ENTHUSIAST_REVIEW.md) records the rationale and acceptance criteria for camera control, the centreline ghost and shared-station analysis.
+
+Pinned setup comparisons and authored lateral lines are available through **Pin current**
+and **Author line**. Drag the diamond handles, evaluate on release, **Optimize from here**,
+or **Adopt as reference**. Studies save the original reference car, road and line alongside
+manual offsets; geometry changes visibly disable stale comparisons. See
+[the line-study guide](docs/LINE_STUDIES.md) and [a saved study](examples/manual-study.json).
