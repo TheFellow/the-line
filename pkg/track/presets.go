@@ -6,7 +6,7 @@ func Presets() []string { return []string{"hairpin", "esses", "compound", "banke
 
 // Preset returns independent illustrative geometry, not surveyed real-world tracks.
 func Preset(name string) (Scene, error) {
-	s := Scene{Version: Version, Vehicle: "club", EntrySpeed: 38, ExitSpeed: 55}
+	s := Scene{Version: Version, Vehicle: "road", EntrySpeed: 38, ExitSpeed: 55}
 	var xy [][2]float64
 	switch name {
 	case "hairpin":
