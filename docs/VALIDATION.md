@@ -245,3 +245,44 @@ node tools/browser/verify.mjs --scope=all --case=elevated-retina --artifacts=art
 go run ./tools/review --out artifacts/once-over-review
 go run ./main/cli animate --preset club-loop --vehicle gt --view perspective --duration 40 --fps 20 --width 960 --height 600 --out artifacts/once-over-review/club-loop-animation.gif
 ```
+
+## Two-car racecraft (2026-09-10)
+
+The four checked-in experiments use the existing solver with an increased road
+margin enclosing a 4.4 m × vehicle-width body. `pkg/racecraft` checks a conservative
+relative-speed bound over the full shared-time interval, recursively subdividing
+ambiguous intervals. A pair is returned only when every interval is certified;
+resolution/work-budget exhaustion rejects the pair. No interpolation between
+render frames can bypass that check.
+
+Default outcomes are recorded in [RACECRAFT.md](RACECRAFT.md): the over-under ends
+with B ahead, the pass/repass restores A's lead, defence holds with a larger gap,
+and the esses demonstrate trading nose-ahead advantage without a completed pass.
+Independent tests verify segment kinematics and force limits, exact planar
+segment-to-segment body clearance against all road edges, dense car-to-car
+clearance, deterministic replay, an occupied-line fallback, changed outcomes,
+input errors, cancellation, persistence and failed-export preservation. The
+between-frame collision fixture crosses two cars inside a 10 ms interval despite
+safe interval endpoints.
+
+The focused real Ebitengine browser checks passed at 1000×700 / DPR 2 and
+1440×900 / DPR 1. They exercise entering/exiting racecraft, preserving the
+qualifying scene and trajectory, gap/overspeed/separation controls, safe rejection,
+complete experiment save/load, scenario changes, shared timeline scrubbing,
+keyboard frame stepping, restart and both views. Captures
+`artifacts/browser/elevated-retina-race-repass.png` and
+`artifacts/browser/plan-race-over-under.png` were visually inspected.
+
+`go run ./tools/preview` generates the public GIF from the normal qualifying and
+racecraft CLI exports. The 391-frame, 960×600 result contains qualifying on Club
+Loop, an over-under in plan view and a pass/repass in elevated view. Decoded
+composited frames from all three clips were visually inspected. Transparent
+unchanged pixels reduce the combined preview to approximately 1.5 MiB without
+adding an external animation tool dependency.
+
+Final Go validation passed: `go test ./...`, `go vet ./...`, and `make build`.
+A `CGO_ENABLED=0` CLI build also exported the pass/repass CSV successfully. After
+chart rescaling and save-path presentation updates, the focused browser suite
+passed again in both viewports (six workflow checks total), recorded in
+`artifacts/browser-race-final/report.json`. A 40 m starting-gap export was also
+visually inspected to verify the adaptive position-chart scale.

@@ -1,8 +1,8 @@
 # The Line
 
-A racing-line playground for curious driving enthusiasts. Reshape a corner, tweak the car, and watch how the line, braking points and lap time change. Explore twelve fictional tracks, from hairpins and rally sections to a continuous club circuit.
+A racing-line playground for curious driving enthusiasts. Reshape a corner, tweak the car, and watch how the line, braking points and lap time change. Explore twelve fictional tracks, from hairpins and rally sections to a continuous club circuit. Switch from qualifying to two-car racecraft to explore inside defence, over-under moves, and pass/repass battles.
 
-![A GT car and its reference ghost lapping the club circuit, with a speed chart below](docs/media/club-loop.gif)
+![Qualifying on the club circuit, then two solid cars demonstrating an over-under and a pass/repass with speed and position-gap charts](docs/media/club-loop.gif)
 
 ## Get running
 
@@ -55,6 +55,43 @@ go run ./main/gui --preset club-loop --vehicle gt
 Scroll to zoom, Shift-drag to pan, and right-drag to orbit the elevated view. **Fit / Reset** brings the track back into view.
 
 Use **Cmd/Ctrl+Z** to undo. Click the file path to choose a save location, then **Cmd/Ctrl+S** to save your study or **Cmd/Ctrl+O** to load it.
+
+## Try two-car racecraft
+
+Click **Racecraft mode** or press **R**. The green **A** car starts ahead; amber
+**B** attacks. Both cars occupy real space in the experiment, with conservative
+body clearance checked throughout the run.
+
+- **Over-under:** A defends the inside; B cuts back and wins on exit.
+- **Pass-repass:** B passes inside; A recovers with a faster exit.
+- **Defend:** more starting distance lets A hold position on the same hairpin.
+- **Esses duel:** side-by-side placement trades the advantage across successive bends.
+
+Click the scenario button to cycle examples. Use **+ / −** to change starting
+gap, B's entry speed advantage, lateral separation, or extra body clearance.
+Watch both speed traces and the signed position gap; a pass marker appears when
+the new leader is a full car length ahead. Drag the timeline, press **, / .** to
+step, or change playback speed to examine the crossover. **Save race / Load race**
+preserve the complete experiment in `racecraft.json`. **R** returns to your
+qualifying study.
+
+These are computed tactical experiments with authored intentions and a finite
+choice of alternative lines. Changing the inputs can prevent a pass or leave no
+safe plan; rejected edits retain the last valid race. Entry speeds are caps, and
+the replay ends when the first car finishes. See the [racecraft design and
+examples](docs/RACECRAFT.md) for assumptions and measured outcomes.
+
+Start directly or export without a graphical desktop:
+
+```sh
+go run ./main/gui --mode racecraft --scenario pass-repass
+go run ./main/gui --race-file examples/racecraft/over-under.json
+go run ./main/cli race --scenario over-under --gap 7 --format csv --out race.csv
+go run ./main/cli race --scenario pass-repass --format gif --view 3d --out race.gif
+```
+
+Rebuild the preview above with `go run ./tools/preview`. It contains qualifying,
+over-under, and pass/repass clips rendered by the same code as the live studio.
 
 For more, see [line studies](docs/LINE_STUDIES.md), [car setup](docs/SETUP.md), and [track editing](docs/TRACK_AUTHORING.md).
 

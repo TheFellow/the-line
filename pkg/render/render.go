@@ -311,7 +311,7 @@ func (r *Renderer) drawBase() {
 	r.text(im, 34, 44, "THE LINE", 26, ink, true)
 	r.text(im, 192, 43, "/  RACING GEOMETRY STUDIO", 12, muted, false)
 	r.text(im, 35, 71, "Explore the corner. Find the flow.", 12, muted, false)
-	r.text(im, w-312, 40, "LOCAL TIME SEARCH", 11, accent, true)
+	r.text(im, w-312, 40, "QUALIFYING / TIME SEARCH", 11, accent, true)
 	topology := "open sequence"
 	if r.result.Closed {
 		topology = "continuous lap"
