@@ -10,25 +10,27 @@ import (
 // acceleration on each validated straight segment. Open paths clamp at their
 // endpoints, including infinite times; NaN selects the entry. An empty
 // trajectory returns a zero Node. Wrapping is a presentation decision.
-func (r Result) At(t float64) Node { return atTime(r.Nodes, t) }
+func (r Result) At(t float64) Node { return r.forceAt(atTime(r.Nodes, t)) }
 
 // CenterAt is At for the verified centreline reference, at the same elapsed
 // seconds rather than the same road station or fraction of traversal time.
-func (r Result) CenterAt(t float64) Node { return atTime(r.CenterNodes, t) }
+func (r Result) CenterAt(t float64) Node { return r.forceAt(atTime(r.CenterNodes, t)) }
 
 // AtStation queries the optimized trajectory at reference-road metres, clamped
 // to the open endpoints. Position and Station vary linearly with segment
 // distance; speed and elapsed time follow constant-acceleration kinematics.
 // Nonfinite queries and empty trajectories return an error.
 func (r Result) AtStation(station float64) (Node, error) {
-	return atStation(r.Nodes, station)
+	n, err := atStation(r.Nodes, station)
+	return r.forceAt(n), err
 }
 
 // CenterAtStation is AtStation for the verified centreline reference. Subtract
 // its Time from AtStation's Time at the same station to measure time gained:
 // a negative optimized-minus-reference delta means the optimized line is ahead.
 func (r Result) CenterAtStation(station float64) (Node, error) {
-	return atStation(r.CenterNodes, station)
+	n, err := atStation(r.CenterNodes, station)
+	return r.forceAt(n), err
 }
 
 func atTime(nodes []Node, t float64) Node {
@@ -80,10 +82,12 @@ func atStation(nodes []Node, station float64) (Node, error) {
 }
 
 func interpolateNode(a, b Node, f, t, speed float64) Node {
+	forces := interpolateForces(a, b, f)
 	return Node{
 		Position: mix(a.Position, b.Position, f), S: lerp(a.S, b.S, f),
 		Station: lerp(a.Station, b.Station, f), Time: t, Speed: speed,
 		Curvature: lerp(a.Curvature, b.Curvature, f), Offset: lerp(a.Offset, b.Offset, f),
 		Acceleration: a.Acceleration,
+		Bank:         forces.Bank, Grade: forces.Grade, Grip: forces.Grip, Forces: forces.Forces,
 	}
 }

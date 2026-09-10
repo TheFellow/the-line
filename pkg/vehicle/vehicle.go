@@ -44,6 +44,9 @@ type Model interface {
 type Envelope struct {
 	Acceleration, Braking, Utilization float64
 	Feasible                           bool
+	// Tyres exposes the force balance used above. Custom models may leave it
+	// unavailable; presentation must not invent channels for an opaque model.
+	Tyres TyreEnvelope
 }
 
 func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
@@ -103,11 +106,25 @@ func (c Config) Limits(speed, curvature, bank, grade, grip float64) Envelope {
 	default:
 		drive = math.Min(front/c.FrontDrive, rear/(1-c.FrontDrive))
 	}
+	driveGrip := drive
+	power := capacity
 	if speed > 1e-6 {
-		drive = math.Min(drive, c.Power/(c.Mass*speed))
+		power = c.Power / (c.Mass * speed)
+		drive = math.Min(drive, power)
 	}
 	resistance := 0.5*AirDensity*c.DragArea*speed*speed/c.Mass + Gravity*grade*cosGrade
-	return Envelope{Acceleration: drive - resistance, Braking: math.Min(c.Brake, residual) + resistance, Utilization: utilization, Feasible: true}
+	scale := 1.0
+	if c.FrontDrive > 0 {
+		scale = math.Min(scale, c.FrontWeight/c.FrontDrive)
+	}
+	if c.FrontDrive < 1 {
+		scale = math.Min(scale, (1-c.FrontWeight)/(1-c.FrontDrive))
+	}
+	brake := math.Min(c.Brake, residual)
+	return Envelope{Acceleration: drive - resistance, Braking: brake + resistance, Utilization: utilization, Feasible: true,
+		Tyres: TyreEnvelope{Available: true, Lateral: lateral, Capacity: capacity, Resistance: resistance,
+			Drive: drive, Brake: brake, DriveGrip: driveGrip, Power: power,
+			DriveScale: scale, BrakeScale: 1, BrakeLimit: c.Brake}}
 }
 func Presets() []string { return []string{"road", "gt", "rally"} }
 func Preset(name string) (Config, error) {

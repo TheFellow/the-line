@@ -20,7 +20,7 @@ func (e evaluator) run(offset []float64) (Result, error) {
 		a, b := path[i].node.Position, path[i+1].node.Position
 		h := math.Hypot(b.X-a.X, b.Y-a.Y)
 		if h < 1e-9 {
-			return Result{}, fmt.Errorf("vertical or zero-length segment")
+			return Result{}, fmt.Errorf("vertical or zero-length segment at station %.2f m", path[i].node.Station)
 		}
 		grades[i] = (b.Z - a.Z) / h
 	}
@@ -44,7 +44,7 @@ func (e evaluator) run(offset []float64) (Result, error) {
 				return true
 			}
 			if !feasible(0) {
-				return Result{}, fmt.Errorf("bank/grade exceeds stationary grip at %.1f m", path[i].node.S)
+				return Result{}, fmt.Errorf("bank/grade exceeds stationary grip at station %.2f m", path[i].node.Station)
 			}
 			if !feasible(cap) {
 				lo, hi := 0., cap
@@ -88,7 +88,7 @@ func (e evaluator) run(offset []float64) (Result, error) {
 				old := speeds[i+1]
 				lo, ok := maximumSpeed(old, residual)
 				if !ok {
-					return Result{}, fmt.Errorf("insufficient driving force at %.1f m", path[i].node.S)
+					return Result{}, fmt.Errorf("insufficient driving force at station %.2f m", path[i].node.Station)
 				}
 				speeds[i+1] = lo
 				change = math.Max(change, old-lo)
@@ -109,7 +109,7 @@ func (e evaluator) run(offset []float64) (Result, error) {
 				old := speeds[i]
 				lo, ok := maximumSpeed(old, residual)
 				if !ok {
-					return Result{}, fmt.Errorf("insufficient braking force at %.1f m", path[i].node.S)
+					return Result{}, fmt.Errorf("insufficient braking force at station %.2f m", path[i].node.Station)
 				}
 				speeds[i] = lo
 				change = math.Max(change, old-lo)
@@ -162,14 +162,15 @@ func (e evaluator) run(offset []float64) (Result, error) {
 		r := math.Max(a-drive, -a-brake)
 		residual = math.Max(residual, r)
 		if r > 2e-5 || !finite(r) {
-			return Result{}, fmt.Errorf("force residual %.6g at %.1f m", r, nodes[i].S)
+			return Result{}, fmt.Errorf("force residual %.6g at station %.2f m", r, nodes[i].Station)
 		}
 		t += 2 * ds / sum
 	}
 	if !finite(t) || t <= 0 {
 		return Result{}, fmt.Errorf("invalid traversal time")
 	}
-	return Result{Nodes: nodes, Duration: t, Length: nodes[n-1].S, MaxForceResidual: residual}, nil
+	e.instrument(nodes, path, grades)
+	return Result{model: e.model, Nodes: nodes, Duration: t, Length: nodes[n-1].S, MaxForceResidual: residual}, nil
 }
 
 // Conservative segment envelope uses the lowest capacities across the represented
