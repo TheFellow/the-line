@@ -53,7 +53,7 @@ func TestWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) < 10 || rows[0][1] != "time_s" || rows[0][len(rows[0])-1] != "station_m" {
+	if len(rows) < 10 || rows[0][1] != "time_s" || rows[0][9] != "station_m" || rows[0][len(rows[0])-1] != "forces_available" {
 		t.Fatal("missing telemetry")
 	}
 	for _, view := range []string{"2d", "3d"} {

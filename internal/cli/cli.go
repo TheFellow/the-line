@@ -49,6 +49,7 @@ Results are heuristic time estimates for the configured vehicle model.
 `
 
 type arguments struct {
+	lineColor, channel                                     string
 	preset, scene, vehicle, vehicleFile, out, format, view string
 	spacing, margin, at, duration, fps                     float64
 	iterations, width, height                              int
@@ -97,6 +98,8 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		f.StringVar(&a.format, "format", "json", "output format: json or csv")
 	}
 	if command == "render" || command == "animate" {
+		f.StringVar(&a.lineColor, "color", "speed", "line color: speed, utilization, lateral_g, longitudinal_g")
+		f.StringVar(&a.channel, "channel", "speed", "chart channel: speed, utilization, lateral_g, longitudinal_g")
 		f.StringVar(&a.view, "view", "2d", "view: 2d or 3d")
 		defaultWidth, defaultHeight := 1440, 900
 		if command == "animate" {
@@ -215,7 +218,7 @@ func Run(args []string, stdout, stderr io.Writer) error {
 		}
 		return output(a.out, write)
 	case "render", "animate":
-		renderer, err := render.New(scene, result, config, render.Options{Width: a.width, Height: a.height, View: a.view})
+		renderer, err := render.New(scene, result, config, render.Options{Width: a.width, Height: a.height, View: a.view, LineColor: render.Channel(a.lineColor), ChartChannel: render.Channel(a.channel)})
 		if err != nil {
 			return err
 		}
@@ -265,15 +268,16 @@ func readVehicle(a arguments, name string) (vehicle.Config, error) {
 }
 func writeCSV(w io.Writer, r solver.Result) error {
 	c := csv.NewWriter(w)
-	if err := c.Write([]string{"s_m", "time_s", "x_m", "y_m", "z_m", "speed_mps", "curvature_per_m", "offset_m", "acceleration_mps2", "station_m"}); err != nil {
+	if err := c.Write([]string{"s_m", "time_s", "x_m", "y_m", "z_m", "speed_mps", "curvature_per_m", "offset_m", "acceleration_mps2", "station_m", "bank_deg", "grade", "grip", "tyre_lateral_mps2", "tyre_longitudinal_mps2", "tyre_capacity_mps2", "tyre_utilization", "phase", "limit", "forces_available"}); err != nil {
 		return err
 	}
 	for _, n := range r.Nodes {
-		values := []float64{n.S, n.Time, n.Position.X, n.Position.Y, n.Position.Z, n.Speed, n.Curvature, n.Offset, n.Acceleration, n.Station}
+		values := []float64{n.S, n.Time, n.Position.X, n.Position.Y, n.Position.Z, n.Speed, n.Curvature, n.Offset, n.Acceleration, n.Station, n.Bank, n.Grade, n.Grip, n.Forces.Lateral, n.Forces.Longitudinal, n.Forces.Capacity, n.Forces.Utilization}
 		row := make([]string, len(values))
 		for i, v := range values {
-			row[i] = strconv.FormatFloat(v, 'f', 6, 64)
+			row[i] = strconv.FormatFloat(v, 'g', 17, 64)
 		}
+		row = append(row, n.Forces.Phase, n.Forces.Limit, strconv.FormatBool(n.Forces.Available))
 		if err := c.Write(row); err != nil {
 			return err
 		}
