@@ -107,7 +107,8 @@ func SolveContext(ctx context.Context, scene track.Scene, model vehicle.Model, o
 		return Result{}, fmt.Errorf("workers must be between 0 and 32 and polish between 0 and 3")
 	}
 	if opts.Seed != nil && opts.Iterations == 0 && opts.Polish == 0 {
-		return EvaluateContext(ctx, scene, model, opts.Seed, opts)
+		result, err := EvaluateContext(ctx, scene, model, opts.Seed, opts)
+		return result, seedFailure(err)
 	}
 	road, err := track.SampleRoad(scene, opts.Spacing)
 	if err != nil {
@@ -145,13 +146,13 @@ func SolveContext(ctx context.Context, scene track.Scene, model vehicle.Model, o
 	if opts.Seed != nil {
 		r, err := EvaluateContext(ctx, scene, model, opts.Seed, opts)
 		if err != nil {
-			return Result{}, &SeedError{Err: err}
+			return Result{}, seedFailure(err)
 		}
 		seedResult = &r
 		count += r.Candidates
 		seeded, err := eval.run(opts.Seed)
 		if err != nil {
-			return Result{}, &SeedError{Err: err}
+			return Result{}, seedFailure(&lineError{err})
 		}
 		count++
 		seedCoarseDuration = seeded.Duration

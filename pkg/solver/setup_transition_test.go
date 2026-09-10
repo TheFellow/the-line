@@ -2,6 +2,8 @@ package solver
 
 import (
 	"errors"
+	"math"
+	"strings"
 	"testing"
 
 	"github.com/TheFellow/the-line/pkg/track"
@@ -68,5 +70,61 @@ func TestInvalidRoadIsNotASeedFailure(t *testing.T) {
 	var seedError *SeedError
 	if err == nil || errors.As(err, &seedError) {
 		t.Fatalf("invalid road would trigger pointless retry: %v", err)
+	}
+}
+
+// This replacement envelope makes a tighter curvature infeasible at every
+// speed, so refining an otherwise accepted coarse road can reject the baseline.
+type curvatureGate struct {
+	constantModel
+	maxCurvature float64
+}
+
+func (m curvatureGate) Limits(v, k, bank, grade, grip float64) vehicle.Envelope {
+	e := m.constantModel.Limits(v, k, bank, grade, grip)
+	e.Feasible = math.Abs(k) <= m.maxCurvature
+	return e
+}
+
+func TestRefinedBaselineFailureIsNotASeedFailure(t *testing.T) {
+	scene, car := fixture(t, "hairpin")
+	opts := DefaultOptions()
+	coarse, _ := track.SampleRoad(scene, opts.Spacing)
+	fine, _ := track.SampleRoad(scene, .5)
+	maxCurvature := func(road []track.Sample) float64 {
+		peak := 0.0
+		for i := 1; i < len(road)-1; i++ {
+			a, b, c := road[i-1].Position, road[i].Position, road[i+1].Position
+			ab, bc, ac := math.Hypot(b.X-a.X, b.Y-a.Y), math.Hypot(c.X-b.X, c.Y-b.Y), math.Hypot(c.X-a.X, c.Y-a.Y)
+			k := 2 * math.Abs((b.X-a.X)*(c.Y-b.Y)-(b.Y-a.Y)*(c.X-b.X)) / (ab * bc * ac)
+			peak = math.Max(peak, k)
+		}
+		return peak
+	}
+	low, high := maxCurvature(coarse), maxCurvature(fine)
+	if high <= low {
+		t.Fatal("fixture does not distinguish refined curvature")
+	}
+	model := curvatureGate{constantModel{car, 2, 4}, (low + high) / 2}
+	opts.Seed = make([]float64, len(coarse))
+	for _, iterations := range []int{0, 1} {
+		opts.Iterations = iterations
+		_, err := Solve(scene, model, opts)
+		var seedError *SeedError
+		if err == nil || errors.As(err, &seedError) || !strings.Contains(err.Error(), "centreline infeasible") {
+			t.Fatalf("refined baseline treated as rejected seed: %v", err)
+		}
+	}
+}
+
+func TestZeroBudgetSeedRejectionKeepsErrorType(t *testing.T) {
+	scene, car := fixture(t, "hairpin")
+	opts := DefaultOptions()
+	opts.Iterations = 0
+	opts.Seed = []float64{100}
+	_, err := Solve(scene, car, opts)
+	var seedError *SeedError
+	if !errors.As(err, &seedError) {
+		t.Fatalf("untyped rejected seed: %v", err)
 	}
 }

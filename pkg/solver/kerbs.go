@@ -53,6 +53,9 @@ func indexRoadEdges(road []track.Sample, radius float64) *roadEdges {
 	newGrid := func() edgeGrid { return edgeGrid{math.Max(2, 2*radius), make(map[[2]int][]roadEdge)} }
 	out := &roadEdges{newGrid(), newGrid()}
 	for i := 0; i < len(road)-1; i++ {
+		if i%64 == 0 {
+			cooperate()
+		}
 		a, b := road[i], road[i+1]
 		for _, side := range []float64{-1, 1} {
 			out.legal.add(roadEdge{a.AtOffset(a.EdgeOffset(side)), b.AtOffset(b.EdgeOffset(side)), 0})

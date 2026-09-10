@@ -21,6 +21,11 @@ func (e evaluator) geometry(offset []float64) ([]pathState, error) {
 		edges = indexRoadEdges(e.road, e.clearance)
 	}
 	for i := 0; i < n-1; i++ {
+		if i%64 == 0 {
+			if err := e.cancelled(); err != nil {
+				return nil, err
+			}
+		}
 		if edges.legal.contactGrip(points[i], points[i+1], math.Max(0, e.clearance-1e-7)) == 0 {
 			return nil, fmt.Errorf("candidate violates side-edge clearance at station %.2f m", e.road[i].S)
 		}

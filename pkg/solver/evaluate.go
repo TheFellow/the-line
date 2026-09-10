@@ -49,15 +49,18 @@ func EvaluateContext(ctx context.Context, scene track.Scene, model vehicle.Model
 		offsets = make([]float64, len(road))
 	}
 	if len(offsets) != len(road) {
-		return Result{}, fmt.Errorf("offsets: got %d, need %d road stations", len(offsets), len(road))
+		return Result{}, &lineError{fmt.Errorf("offsets: got %d, need %d road stations", len(offsets), len(road))}
 	}
 	if err := validatePeriodicOffsets(road, offsets); err != nil {
-		return Result{}, err
+		return Result{}, &lineError{err}
 	}
 	clearance := model.Parameters().Width/2 + opts.Margin
 	for i, offset := range offsets {
-		if !finite(offset) || road[i].LeftLimit() <= clearance || road[i].RightLimit() <= clearance || offset > road[i].LeftLimit()-clearance || offset < -road[i].RightLimit()+clearance {
-			return Result{}, fmt.Errorf("offset at station %.2f m violates vehicle clearance", road[i].S)
+		if road[i].LeftLimit() <= clearance || road[i].RightLimit() <= clearance {
+			return Result{}, fmt.Errorf("road at %.2f m is narrower than vehicle and clearance", road[i].S)
+		}
+		if !finite(offset) || offset > road[i].LeftLimit()-clearance || offset < -road[i].RightLimit()+clearance {
+			return Result{}, &lineError{fmt.Errorf("offset at station %.2f m violates vehicle clearance", road[i].S)}
 		}
 	}
 	spacing := math.Min(opts.Spacing, .5)
@@ -70,11 +73,6 @@ func EvaluateContext(ctx context.Context, scene track.Scene, model vehicle.Model
 		road = fine
 	}
 	eval := evaluator{ctx: ctx, road: road, model: model, entry: scene.EntrySpeed, exit: scene.ExitSpeed, clearance: clearance, edges: indexRoadEdges(road, clearance)}
-	result, err := eval.run(offsets)
-	if err != nil {
-		return Result{}, err
-	}
-	baseline := result
 	isCenter := true
 	for _, offset := range offsets {
 		if offset != 0 {
@@ -82,10 +80,17 @@ func EvaluateContext(ctx context.Context, scene track.Scene, model vehicle.Model
 			break
 		}
 	}
+	// Establish baseline feasibility before attributing a profile failure to
+	// a supplied line. This also distinguishes refined-road failures from seeds.
+	baseline, err := eval.run(make([]float64, len(road)))
+	if err != nil {
+		return Result{}, fmt.Errorf("centreline infeasible: %w", err)
+	}
+	result := baseline
 	if !isCenter {
-		baseline, err = eval.run(make([]float64, len(road)))
+		result, err = eval.run(offsets)
 		if err != nil {
-			return Result{}, fmt.Errorf("centreline infeasible: %w", err)
+			return Result{}, &lineError{err}
 		}
 	}
 
