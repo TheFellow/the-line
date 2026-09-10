@@ -4,6 +4,7 @@ package editor
 
 import (
 	"fmt"
+	"github.com/TheFellow/the-line/pkg/vehicle"
 
 	"github.com/TheFellow/the-line/pkg/track"
 )
@@ -11,19 +12,32 @@ import (
 type snapshot struct {
 	scene    track.Scene
 	selected int
+	vehicle  vehicle.Config
 }
 type Editor struct {
 	current    snapshot
 	undo, redo []snapshot
 }
 
-func clone(s track.Scene) track.Scene { s.Points = append([]track.Point(nil), s.Points...); return s }
-func valid(s track.Scene) error       { _, err := track.SampleRoad(s, 2); return err }
+func clone(s track.Scene) track.Scene {
+	s.Points = append([]track.Point(nil), s.Points...)
+	if s.VehicleConfig != nil {
+		v := *s.VehicleConfig
+		s.VehicleConfig = &v
+	}
+	s.Study = track.CloneStudy(s.Study)
+	return s
+}
+func valid(s track.Scene) error { _, err := track.SampleRoad(s, 2); return err }
 func New(scene track.Scene) (*Editor, error) {
 	if err := valid(scene); err != nil {
 		return nil, err
 	}
-	return &Editor{current: snapshot{clone(scene), 0}}, nil
+	v, err := sceneVehicle(scene)
+	if err != nil {
+		return nil, err
+	}
+	return &Editor{current: snapshot{scene: clone(scene), vehicle: v}}, nil
 }
 
 // Scene returns an independent copy; mutating it cannot bypass validation.
@@ -51,12 +65,28 @@ func (e *Editor) commit(s track.Scene, selected int) error {
 		e.undo = append([]snapshot(nil), e.undo[len(e.undo)-100:]...)
 	}
 	e.redo = nil
-	e.current = snapshot{clone(s), max(0, min(selected, len(s.Points)-1))}
+	e.current = snapshot{scene: clone(s), selected: max(0, min(selected, len(s.Points)-1)), vehicle: e.current.vehicle}
 	return nil
 }
 
 // Replace commits a new or loaded scene as one undoable operation.
-func (e *Editor) Replace(scene track.Scene) error { return e.commit(scene, 0) }
+func (e *Editor) Replace(scene track.Scene) error {
+	v, err := sceneVehicle(scene)
+	if err != nil {
+		return err
+	}
+	if err := e.commit(scene, 0); err != nil {
+		return err
+	}
+	e.current.vehicle = v
+	return nil
+}
+func sceneVehicle(scene track.Scene) (vehicle.Config, error) {
+	if scene.VehicleConfig != nil {
+		return *scene.VehicleConfig, scene.VehicleConfig.Validate()
+	}
+	return vehicle.Preset(scene.Vehicle)
+}
 func (e *Editor) UpdatePoint(index int, p track.Point) error {
 	if err := e.index(index); err != nil {
 		return err
@@ -128,7 +158,7 @@ func (e *Editor) Checkpoint() func() {
 
 func (e *Editor) copyState() Editor {
 	copySnapshot := func(s snapshot) snapshot {
-		return snapshot{scene: clone(s.scene), selected: s.selected}
+		return snapshot{scene: clone(s.scene), selected: s.selected, vehicle: s.vehicle}
 	}
 	copyHistory := func(history []snapshot) []snapshot {
 		out := make([]snapshot, len(history))
@@ -148,3 +178,23 @@ func (e *Editor) Load(path string) error {
 	return e.Replace(s)
 }
 func (e *Editor) Save(path string) error { return track.Save(path, e.current.scene) }
+
+// Vehicle returns the current immutable setup value.
+func (e *Editor) Vehicle() vehicle.Config { return e.current.vehicle }
+
+// SetVehicle is one validated setup edit in the same scene undo history.
+func (e *Editor) SetVehicle(v vehicle.Config) error {
+	if err := v.Validate(); err != nil {
+		return err
+	}
+	if v == e.Vehicle() {
+		return nil
+	}
+	scene := e.Scene()
+	scene.VehicleConfig = &v
+	if err := e.commit(scene, e.Selected()); err != nil {
+		return err
+	}
+	e.current.vehicle = v
+	return nil
+}

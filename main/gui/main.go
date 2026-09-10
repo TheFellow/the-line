@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -33,9 +34,13 @@ type options struct {
 }
 
 type solved struct {
-	result solver.Result
-	config vehicle.Config
-	err    error
+	result      solver.Result
+	config      vehicle.Config
+	err         error
+	generation  int
+	provisional bool
+	sensitivity []solver.Sensitivity
+	analysis    bool
 }
 
 type game struct {
@@ -48,6 +53,16 @@ type game struct {
 	texture              *ebiten.Image
 	replies              chan solved
 	busy                 bool
+	setupOpen            bool
+	customCar            *vehicle.Config
+	provisional          bool
+	cancelSolve          context.CancelFunc
+	generation           int
+	sensitivity          []solver.Sensitivity
+	analyzing            bool
+	oldResult            solver.Result
+	oldConfig            vehicle.Config
+	oldScene             track.Scene
 	solveRequests        int
 	rollback             func()
 	playing              bool
@@ -111,6 +126,7 @@ func main() {
 	}
 	if o.vehicle != "" {
 		s.Vehicle = o.vehicle
+		s.VehicleConfig = nil
 	}
 	v, err := vehicle.Preset(s.Vehicle)
 	if err != nil {
@@ -120,6 +136,8 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	v = ed.Vehicle()
+
 	result, err := solver.Solve(s, v, solver.DefaultOptions())
 	if err != nil {
 		log.Fatal(err)
@@ -181,7 +199,7 @@ func (g *game) recordError(err error) {
 }
 
 func (g *game) rebuild() error {
-	opts := render.Options{Width: g.opts.width, Height: g.opts.height, View: g.opts.view}
+	opts := render.Options{Width: g.opts.width, Height: g.opts.height, View: g.opts.view, Setup: g.setupOpen}
 	if !g.resetCamera || g.busy {
 		camera := g.renderer.Camera()
 		opts.Camera = &camera
@@ -197,22 +215,7 @@ func (g *game) rebuild() error {
 	return nil
 }
 
-func (g *game) queueSolve(rollback func()) {
-	g.solveRequests++
-	g.busy = true
-	g.rollback = rollback
-	g.setStatus("Computing a feasible line… playback continues")
-	s := g.ed.Scene()
-	go func() {
-		v, err := vehicle.Preset(s.Vehicle)
-		if err != nil {
-			g.replies <- solved{err: err}
-			return
-		}
-		r, err := solver.Solve(s, v, solver.DefaultOptions())
-		g.replies <- solved{result: r, config: v, err: err}
-	}()
-}
+func (g *game) queueSolve(rollback func()) { g.startSolve(rollback, false) }
 
 func (g *game) Update() error {
 	defer inspectFrame(g)
@@ -220,31 +223,10 @@ func (g *game) Update() error {
 		return ebiten.Termination
 	}
 	g.frame++
-	select {
-	case reply := <-g.replies:
-		g.busy = false
-		if reply.err != nil {
-			if g.rollback != nil {
-				g.rollback()
-			}
-			g.recordError(fmt.Errorf("edit reverted: %w", reply.err))
-		} else {
-			fraction := g.clock / g.playbackDuration()
-			g.result, g.config = reply.result, reply.config
-			g.solvedScene = g.ed.Scene()
-			g.clock = fraction * g.playbackDuration()
-			if g.resetCamera {
-				g.cancelPointer()
-			}
-			if err := g.rebuild(); err != nil {
-				return err
-			}
-			g.setStatus(fmt.Sprintf("Solved · %.2f s · %.2f s faster than centreline", g.result.Duration, g.result.CenterDuration-g.result.Duration))
-		}
-		g.rollback = nil
-		g.resetCamera = false
-	default:
+	if err := g.acceptReplies(); err != nil {
+		return err
 	}
+
 	if g.playing {
 		g.clock += g.rate / 60
 		if g.clock > g.playbackDuration() {
@@ -446,6 +428,9 @@ func (g *game) scrub(x int) {
 
 // action is shared by real click/key events and deterministic verification.
 func (g *game) action(key string) {
+	if g.setupAction(key) {
+		return
+	}
 	s := g.ed.Scene()
 	i := g.ed.Selected()
 	switch key {
@@ -542,16 +527,6 @@ func (g *game) action(key string) {
 		if err == nil {
 			err = g.ed.Replace(scene)
 		}
-	case "vehicle":
-		names := vehicle.Presets()
-		next := 0
-		for j, name := range names {
-			if name == s.Vehicle {
-				next = (j + 1) % len(names)
-			}
-		}
-		s.Vehicle = names[next]
-		err = g.ed.Replace(s)
 	case "undo":
 		if !g.ed.Undo() {
 			g.setStatus("Nothing to undo")
@@ -715,7 +690,8 @@ func (g *game) Draw(screen *ebiten.Image) {
 		path = g.fileDraft + "|"
 		status = "Editing save / load path · ENTER confirm · ESC cancel"
 	}
-	state := render.State{Selected: g.ed.Selected(), Playing: g.playing, Status: status, FPS: ebiten.ActualFPS(), FilePath: path, Comparison: g.comparison, Rate: g.rate}
+	setupCar := g.ed.Vehicle()
+	state := render.State{SetupConfig: &setupCar, Sensitivity: g.sensitivity, Provisional: g.provisional, Selected: g.ed.Selected(), Playing: g.playing, Status: status, FPS: ebiten.ActualFPS(), FilePath: path, Comparison: g.comparison, Rate: g.rate}
 	if g.hover >= 0 && !g.busy {
 		state.Hover = &g.hover
 	}

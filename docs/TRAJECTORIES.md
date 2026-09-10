@@ -39,3 +39,13 @@ bin/the-line solve --preset esses --format csv --out artifacts/esses-selected.cs
 ```
 
 These additions expose the existing quasi-static heuristic's verified output. They do not change force assumptions, search decisions or integrated durations, and the illustrative vehicle presets remain uncalibrated.
+
+## Fixed-line evaluation and setup sweeps
+
+Results additionally export `offsets`, one horizontal lateral offset per final
+road sample (not per trajectory node: triangle crossings add trajectory nodes).
+Call `solver.Evaluate(scene, car, result.Offsets, Options{Spacing: result.Spacing,
+Margin: originalMargin})` to reproduce the path profile exactly. `Options.Seed`
+contains offsets at the requested search spacing. `SolveContext` and
+`EvaluateContext` support cancellation. See [the setup workbench](SETUP.md) for
+fixed-path sensitivity semantics and CLI examples.

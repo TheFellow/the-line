@@ -27,19 +27,23 @@ type Options struct {
 	View string
 	// Camera preserves an explicit framing; nil fits the road automatically.
 	Camera *Camera
+	Setup  bool
 }
 
 // State contains transient editor state; none of it changes the solved path.
 type State struct {
-	Selected   int
-	Playing    bool
-	Status     string
-	FPS        float64
-	FilePath   string
-	Hover      *int
-	Drag       *DragPreview
-	Comparison bool
-	Rate       float64
+	Selected    int
+	Playing     bool
+	Status      string
+	FPS         float64
+	FilePath    string
+	Hover       *int
+	Drag        *DragPreview
+	Comparison  bool
+	Rate        float64
+	SetupConfig *vehicle.Config
+	Sensitivity []solver.Sensitivity
+	Provisional bool
 }
 
 // DragPreview is an uncommitted control position shown over the last solved road.
@@ -180,7 +184,9 @@ func (r *Renderer) FrameWithState(t float64, state State) image.Image {
 		circle(roadImage, q, 11, color.RGBA{178, 238, 135, 35})
 		circle(roadImage, q, 6, accent)
 		circle(roadImage, q, 3, bg)
-		r.selection(im, selected, p)
+		if !r.opts.Setup {
+			r.selection(im, selected, p)
+		}
 	}
 	if state.Comparison && len(r.result.CenterNodes) > 1 {
 		r.ghost(roadImage, t)
@@ -194,6 +200,9 @@ func (r *Renderer) FrameWithState(t float64, state State) image.Image {
 	}
 	if state.Drag != nil {
 		r.drawDrag(roadImage, *state.Drag)
+	}
+	if r.opts.Setup {
+		r.setupFrame(im, state)
 	}
 	path := state.FilePath
 	if path == "" {
@@ -438,39 +447,44 @@ func (r *Renderer) sidebar(im *image.RGBA) {
 	r.button(im, "save", image.Rect(x+192, 175, x+280, 209), "SAVE", false)
 	r.controls["path"] = image.Rect(x, 211, x+280, 233)
 	line(im, point{float64(x), 235}, point{float64(x + 280), 235}, 1, faint)
-	r.text(im, x, 251, "VEHICLE · ILLUSTRATIVE", 11, muted, true)
-	r.text(im, x, 276, truncate(r.vehicle.Name, 28), 18, ink, true)
-	drive := "AWD"
-	if r.vehicle.FrontDrive == 0 {
-		drive = "RWD"
-	}
-	if r.vehicle.FrontDrive == 1 {
-		drive = "FWD"
-	}
-	r.text(im, x, 298, fmt.Sprintf("%.0f kg · %.0f kW · %.0f kW/t", r.vehicle.Mass, r.vehicle.Power/1000, r.vehicle.Power/r.vehicle.Mass), 12, muted, false)
-	r.button(im, "vehicle", image.Rect(x, 312, x+280, 346), "CHANGE VEHICLE  →", false)
-	r.text(im, x, 359, fmt.Sprintf("%s · tyre grip ×%.2f · fixed axle loads", drive, r.vehicle.Grip), 11, muted, false)
-	line(im, point{float64(x), 363}, point{float64(x + 280), 363}, 1, faint)
-	r.text(im, x, 388, "CONTROL POINT", 11, muted, true)
-	r.button(im, "previous", image.Rect(x+187, 372, x+229, 402), "‹", false)
-	r.button(im, "next", image.Rect(x+239, 372, x+280, 402), "›", false)
-	for i, key := range []string{"width", "bank", "height", "surface"} {
-		y := 441 + i*37
-		r.button(im, key+"-", image.Rect(x+191, y-21, x+229, y+9), "−", false)
-		r.button(im, key+"+", image.Rect(x+239, y-21, x+280, y+9), "+", false)
-	}
-	r.button(im, "add", image.Rect(x, 593, x+134, 627), "ADD POINT", false)
-	r.button(im, "delete", image.Rect(x+145, 593, x+280, 627), "DELETE", false)
-	r.button(im, "undo", image.Rect(x, 638, x+134, 672), "UNDO", false)
-	r.button(im, "redo", image.Rect(x+145, 638, x+280, 672), "REDO", false)
-	// Compact heights retain editing controls; solve summary occupies extra space.
-	if r.opts.Height >= 820 {
-		line(im, point{float64(x), 691}, point{float64(x + 280), 691}, 1, faint)
-		r.text(im, x, 707, "LINE / CENTRELINE REFERENCE", 11, muted, true)
-		r.text(im, x, 732, fmt.Sprintf("%.2f / %.2f s", r.result.Duration, r.result.CenterDuration), 22, ink, true)
-		r.text(im, x, 750, fmt.Sprintf("IN   cap %.0f · line %.0f · ref %.0f km/h", r.result.EntrySpeedCap*3.6, r.result.Nodes[0].Speed*3.6, r.result.CenterEntrySpeed*3.6), 11, muted, false)
-		r.text(im, x, 766, fmt.Sprintf("OUT cap %.0f · line %.0f · ref %.0f km/h", r.result.ExitSpeedCap*3.6, r.result.Nodes[len(r.result.Nodes)-1].Speed*3.6, r.result.CenterExitSpeed*3.6), 11, muted, false)
-		r.text(im, x, 781, "Shared caps; actual entry speeds can differ", 11, muted, false)
+	r.button(im, "setup", image.Rect(x+175, 240, x+280, 266), "SETUP →", false)
+	if r.opts.Setup {
+		r.setupSidebar(im)
+	} else {
+		r.text(im, x, 251, "ILLUSTRATIVE CAR", 11, muted, true)
+		r.text(im, x, 276, truncate(r.vehicle.Name, 28), 18, ink, true)
+		drive := "AWD"
+		if r.vehicle.FrontDrive == 0 {
+			drive = "RWD"
+		}
+		if r.vehicle.FrontDrive == 1 {
+			drive = "FWD"
+		}
+		r.text(im, x, 298, fmt.Sprintf("%.0f kg · %.0f kW · %.0f kW/t", r.vehicle.Mass, r.vehicle.Power/1000, r.vehicle.Power/r.vehicle.Mass), 12, muted, false)
+		r.button(im, "vehicle", image.Rect(x, 312, x+280, 346), "CHANGE VEHICLE  →", false)
+		r.text(im, x, 359, fmt.Sprintf("%s · tyre grip ×%.2f · fixed axle loads", drive, r.vehicle.Grip), 11, muted, false)
+		line(im, point{float64(x), 363}, point{float64(x + 280), 363}, 1, faint)
+		r.text(im, x, 388, "CONTROL POINT", 11, muted, true)
+		r.button(im, "previous", image.Rect(x+187, 372, x+229, 402), "‹", false)
+		r.button(im, "next", image.Rect(x+239, 372, x+280, 402), "›", false)
+		for i, key := range []string{"width", "bank", "height", "surface"} {
+			y := 441 + i*37
+			r.button(im, key+"-", image.Rect(x+191, y-21, x+229, y+9), "−", false)
+			r.button(im, key+"+", image.Rect(x+239, y-21, x+280, y+9), "+", false)
+		}
+		r.button(im, "add", image.Rect(x, 593, x+134, 627), "ADD POINT", false)
+		r.button(im, "delete", image.Rect(x+145, 593, x+280, 627), "DELETE", false)
+		r.button(im, "undo", image.Rect(x, 638, x+134, 672), "UNDO", false)
+		r.button(im, "redo", image.Rect(x+145, 638, x+280, 672), "REDO", false)
+		// Compact heights retain editing controls; solve summary occupies extra space.
+		if r.opts.Height >= 820 {
+			line(im, point{float64(x), 691}, point{float64(x + 280), 691}, 1, faint)
+			r.text(im, x, 707, "LINE / CENTRELINE REFERENCE", 11, muted, true)
+			r.text(im, x, 732, fmt.Sprintf("%.2f / %.2f s", r.result.Duration, r.result.CenterDuration), 22, ink, true)
+			r.text(im, x, 750, fmt.Sprintf("IN   cap %.0f · line %.0f · ref %.0f km/h", r.result.EntrySpeedCap*3.6, r.result.Nodes[0].Speed*3.6, r.result.CenterEntrySpeed*3.6), 11, muted, false)
+			r.text(im, x, 766, fmt.Sprintf("OUT cap %.0f · line %.0f · ref %.0f km/h", r.result.ExitSpeedCap*3.6, r.result.Nodes[len(r.result.Nodes)-1].Speed*3.6, r.result.CenterExitSpeed*3.6), 11, muted, false)
+			r.text(im, x, 781, "Shared caps; actual entry speeds can differ", 11, muted, false)
+		}
 	}
 	r.button(im, "fit", image.Rect(r.opts.Width-620, 99, r.opts.Width-500, 132), "FIT / RESET", false)
 	r.button(im, "view", image.Rect(r.opts.Width-490, 99, r.opts.Width-356, 132), "SWITCH 2D / 3D", false)
