@@ -30,7 +30,7 @@ func (r *Renderer) raceBase() {
 	}
 	fill(im, image.Rect(1112, 80, 1440, 784), panel)
 	r.text(im, 1130, 110, "RACE EXPERIMENT", 16, ink, true)
-	r.button(im, "race-scenario", image.Rect(1130, 129, 1418, 166), "NEXT: "+r.opts.Race.Config.Scenario, false)
+	r.button(im, "race-scenario", image.Rect(1130, 129, 1418, 166), "LOAD NEXT EXAMPLE", false)
 	for i, car := range r.opts.Race.Cars {
 		r.text(im, 1130, 194+i*25, car.Name+"  "+car.Intent, 12, raceColors[i], false)
 	}
@@ -38,18 +38,30 @@ func (r *Renderer) raceBase() {
 	for i, field := range []struct {
 		key, label string
 		value      float64
-	}{{"gap", "Starting gap / m", c.Gap}, {"overspeed", "B entry advantage / m/s", c.Overspeed}, {"separation", "Lateral separation / m", c.Separation}, {"clearance", "Body clearance / m", c.Clearance}} {
+	}{{"gap", "Starting gap / m", c.Gap}, {"overspeed", "B entry cap delta / m/s", c.Overspeed}, {"separation", "Lateral separation / m", c.Separation}, {"clearance", "Body clearance / m", c.Clearance}} {
 		y := 254 + i*70
 		r.text(im, 1130, y, field.label, 12, muted, false)
-		r.text(im, 1247, y+30, fmt.Sprintf("%.1f", field.value), 18, ink, true)
+		precision := 1
+		if field.key == "separation" || field.key == "clearance" {
+			precision = 2
+		}
+		r.text(im, 1247, y+30, fmt.Sprintf("%.*f", precision, field.value), 18, ink, true)
 		r.button(im, "race-"+field.key+"-", image.Rect(1130, y+8, 1180, y+42), "-", false)
 		r.button(im, "race-"+field.key+"+", image.Rect(1368, y+8, 1418, y+42), "+", false)
 	}
-	r.text(im, 1130, 552, fmt.Sprintf("Body gap certified >= %.2f m", r.opts.Race.MinClearance), 12, accent, false)
-	r.text(im, 1130, 577, "Complete pass = 4.4 m ahead", 12, muted, false)
-	r.text(im, 1130, 601, "Stops at first finish; replay together", 11, muted, false)
-	r.text(im, 1130, 625, "Entry speeds are caps; grip can", 11, muted, false)
-	r.text(im, 1130, 642, "reduce the requested advantage.", 11, muted, false)
+	r.text(im, 1130, 547, fmt.Sprintf("Certified body gap >= %.2f m", r.opts.Race.MinClearance), 12, accent, false)
+	minimum := math.Inf(1)
+	for i := 0; i <= 400; i++ {
+		n := r.opts.Race.At(r.opts.Race.Duration * float64(i) / 400)
+		gap := math.Hypot(n[0].Position.X-n[1].Position.X, n[0].Position.Y-n[1].Position.Y) - r.opts.Race.Cars[0].Radius - r.opts.Race.Cars[1].Radius
+		minimum = math.Min(minimum, gap)
+	}
+	r.text(im, 1130, 568, fmt.Sprintf("Sampled body gap min ~ %.2f m", minimum), 12, muted, false)
+	r.text(im, 1130, 590, "Complete pass = 4.4 m ahead", 12, muted, false)
+	r.text(im, 1130, 610, "Stops at first finish; replay together", 11, muted, false)
+	start := r.opts.Race.At(0)
+	r.text(im, 1130, 633, fmt.Sprintf("Start m/s: A %.2f / B %.2f", start[0].Speed, start[1].Speed), 12, ink, false)
+	r.text(im, 1130, 652, "Cap delta is at station 0; A starts ahead", 11, muted, false)
 	r.text(im, 1130, 672, "Offline tactical estimate", 12, muted, false)
 	r.button(im, "view", image.Rect(1130, 695, 1268, 732), "2D / 3D", false)
 	r.button(im, "fit", image.Rect(1280, 695, 1418, 732), "FIT", false)
