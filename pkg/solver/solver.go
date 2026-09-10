@@ -19,17 +19,25 @@ type Options struct {
 func DefaultOptions() Options { return Options{Spacing: 3, Iterations: 4, Margin: .25} }
 
 type Node struct {
-	Position     track.Vec3 `json:"position"`
-	S            float64    `json:"s"`
-	Time         float64    `json:"time"`
-	Speed        float64    `json:"speed"`
-	Curvature    float64    `json:"curvature"`
-	Offset       float64    `json:"offset"`
-	Acceleration float64    `json:"acceleration"`
+	Position track.Vec3 `json:"position"`
+	// S is actual three-dimensional distance along this trajectory, in metres.
+	S float64 `json:"s"`
+	// Station is distance along the sampled reference centreline, in metres.
+	// It is shared by optimized and centreline paths and varies linearly with
+	// segment distance between road stations and inserted triangle crossings.
+	Station      float64 `json:"station"`
+	Time         float64 `json:"time"`
+	Speed        float64 `json:"speed"`
+	Curvature    float64 `json:"curvature"`
+	Offset       float64 `json:"offset"`
+	Acceleration float64 `json:"acceleration"`
 }
 
 type Result struct {
-	Nodes            []Node         `json:"nodes"`
+	Nodes []Node `json:"nodes"`
+	// CenterNodes is the verified centreline trajectory under the same model,
+	// surfaces, clearance and requested endpoint caps as Nodes.
+	CenterNodes      []Node         `json:"center_nodes"`
 	Road             []track.Sample `json:"-"`
 	Duration         float64        `json:"duration"`
 	CenterDuration   float64        `json:"center_duration"`
@@ -45,36 +53,6 @@ type Result struct {
 	CenterExitSpeed  float64        `json:"center_exit_speed"`
 	Termination      string         `json:"termination"`
 	MaxForceResidual float64        `json:"max_force_residual"`
-}
-
-// At interpolates the validated piecewise-linear path with constant segment
-// acceleration. Open paths clamp at their endpoints; wrapping is a UI decision.
-func (r Result) At(t float64) Node {
-	if len(r.Nodes) == 0 {
-		return Node{}
-	}
-	if t <= 0 {
-		return r.Nodes[0]
-	}
-	last := r.Nodes[len(r.Nodes)-1]
-	if t >= last.Time {
-		return last
-	}
-	lo, hi := 0, len(r.Nodes)-1
-	for lo+1 < hi {
-		mid := (lo + hi) / 2
-		if r.Nodes[mid].Time <= t {
-			lo = mid
-		} else {
-			hi = mid
-		}
-	}
-	a, b := r.Nodes[lo], r.Nodes[hi]
-	dt := t - a.Time
-	ds := b.S - a.S
-	f := (a.Speed*dt + .5*a.Acceleration*dt*dt) / ds
-	f = clamp(f, 0, 1)
-	return Node{Position: mix(a.Position, b.Position, f), S: a.S + f*ds, Time: t, Speed: math.Max(0, a.Speed+a.Acceleration*dt), Curvature: lerp(a.Curvature, b.Curvature, f), Offset: lerp(a.Offset, b.Offset, f), Acceleration: a.Acceleration}
 }
 
 // Solve treats entry/exit speeds as upper bounds and leaves endpoint offsets
@@ -205,6 +183,7 @@ func Solve(scene track.Scene, model vehicle.Model, opts Options) (Result, error)
 		}
 		road = fine
 	}
+	best.CenterNodes = append([]Node(nil), baseline.Nodes...)
 	best.CenterDuration = baseline.Duration
 	best.CenterEntrySpeed = baseline.Nodes[0].Speed
 	best.CenterExitSpeed = baseline.Nodes[len(baseline.Nodes)-1].Speed

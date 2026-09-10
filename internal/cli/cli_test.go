@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/TheFellow/the-line/pkg/solver"
 	"github.com/TheFellow/the-line/pkg/track"
 )
 
@@ -36,10 +37,7 @@ func TestWorkflow(t *testing.T) {
 	run("solve", "--scene", scene, "--iterations", "1")
 	var solved struct {
 		Scene  track.Scene
-		Result struct {
-			Duration       float64 `json:"duration"`
-			CenterDuration float64 `json:"center_duration"`
-		}
+		Result solver.Result
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &solved); err != nil {
 		t.Fatal(err)
@@ -47,12 +45,15 @@ func TestWorkflow(t *testing.T) {
 	if solved.Result.Duration <= 0 || solved.Result.Duration > solved.Result.CenterDuration+1e-8 {
 		t.Fatalf("invalid time comparison: %+v", solved.Result)
 	}
+	if len(solved.Result.CenterNodes) == 0 || solved.Result.CenterNodes[len(solved.Result.CenterNodes)-1].Time != solved.Result.CenterDuration {
+		t.Fatal("JSON omits verified centreline trajectory")
+	}
 	run("solve", "--scene", scene, "--iterations", "1", "--format", "csv")
 	rows, err := csv.NewReader(&stdout).ReadAll()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) < 10 || rows[0][1] != "time_s" {
+	if len(rows) < 10 || rows[0][1] != "time_s" || rows[0][len(rows[0])-1] != "station_m" {
 		t.Fatal("missing telemetry")
 	}
 	for _, view := range []string{"2d", "3d"} {

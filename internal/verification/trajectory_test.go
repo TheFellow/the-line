@@ -30,22 +30,45 @@ func TestPresetVehicleMatrix(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				for i, node := range result.Nodes {
-					for _, value := range []float64{node.Position.X, node.Position.Y, node.Position.Z, node.S, node.Time, node.Speed, node.Curvature, node.Acceleration} {
-						if math.IsNaN(value) || math.IsInf(value, 0) {
-							t.Fatalf("nonfinite output at node %d", i)
-						}
-					}
-				}
 				if result.Duration > result.CenterDuration+1e-7 {
 					t.Fatal("optimization regressed against its baseline")
 				}
-				if result.Nodes[0].Speed > scene.EntrySpeed+1e-7 || result.Nodes[len(result.Nodes)-1].Speed > scene.ExitSpeed+1e-7 {
-					t.Fatal("endpoint cap exceeded")
+				for _, trajectory := range []struct {
+					name     string
+					nodes    []solver.Node
+					duration float64
+				}{{"optimized", result.Nodes, result.Duration}, {"reference", result.CenterNodes, result.CenterDuration}} {
+					t.Run(trajectory.name, func(t *testing.T) {
+						if len(trajectory.nodes) < 2 {
+							t.Fatal("missing trajectory")
+						}
+						for i, node := range trajectory.nodes {
+							for _, value := range []float64{node.Position.X, node.Position.Y, node.Position.Z, node.S, node.Station, node.Time, node.Speed, node.Curvature, node.Acceleration} {
+								if math.IsNaN(value) || math.IsInf(value, 0) {
+									t.Fatalf("nonfinite output at node %d", i)
+								}
+							}
+							if i > 0 && node.Station <= trajectory.nodes[i-1].Station {
+								t.Fatal("reference station is not strictly increasing")
+							}
+						}
+						first, last := trajectory.nodes[0], trajectory.nodes[len(trajectory.nodes)-1]
+						if first.Station != result.Road[0].S || last.Station != result.Road[len(result.Road)-1].S {
+							t.Fatal("road station bounds differ")
+						}
+						if last.Time != trajectory.duration {
+							t.Fatal("duration does not match last node")
+						}
+						if first.Speed > scene.EntrySpeed+1e-7 || last.Speed > scene.ExitSpeed+1e-7 {
+							t.Fatal("endpoint cap exceeded")
+						}
+						checked := result
+						checked.Nodes = trajectory.nodes
+						minClearance := checkClearance(t, checked, cfg.Width/2+opts.Margin)
+						residual := checkForces(t, checked, cfg)
+						t.Logf("time %.6fs clearance %.6fm max force excess %.3g m/s²", trajectory.duration, minClearance, residual)
+					})
 				}
-				minClearance := checkClearance(t, result, cfg.Width/2+opts.Margin)
-				residual := checkForces(t, result, cfg)
-				t.Logf("time %.6fs baseline %.6fs clearance %.6fm max force excess %.3g m/s²", result.Duration, result.CenterDuration, minClearance, residual)
 			})
 		}
 	}
@@ -145,6 +168,10 @@ func checkForces(t *testing.T, r solver.Result, c vehicle.Config) float64 {
 			for j := 0; j <= 128; j++ {
 				f := float64(j) / 128
 				u := fraction(a.Position)*(1-f) + fraction(b.Position)*f
+				wantStation := r.Road[cell].S*(1-u) + r.Road[cell+1].S*u
+				if math.Abs(a.Station*(1-f)+b.Station*f-wantStation) > 1e-7 {
+					t.Fatalf("segment %d station disagrees with reconstructed road fraction", i)
+				}
 				bank := (r.Road[cell].Bank*(1-u) + r.Road[cell+1].Bank*u) * math.Pi / 180
 				k := a.Curvature*(1-f) + b.Curvature*f
 				v := math.Sqrt(a.Speed*a.Speed*(1-f) + b.Speed*b.Speed*f)

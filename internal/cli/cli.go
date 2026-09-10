@@ -255,11 +255,11 @@ func readVehicle(a arguments, name string) (vehicle.Config, error) {
 }
 func writeCSV(w io.Writer, r solver.Result) error {
 	c := csv.NewWriter(w)
-	if err := c.Write([]string{"s_m", "time_s", "x_m", "y_m", "z_m", "speed_mps", "curvature_per_m", "offset_m", "acceleration_mps2"}); err != nil {
+	if err := c.Write([]string{"s_m", "time_s", "x_m", "y_m", "z_m", "speed_mps", "curvature_per_m", "offset_m", "acceleration_mps2", "station_m"}); err != nil {
 		return err
 	}
 	for _, n := range r.Nodes {
-		values := []float64{n.S, n.Time, n.Position.X, n.Position.Y, n.Position.Z, n.Speed, n.Curvature, n.Offset, n.Acceleration}
+		values := []float64{n.S, n.Time, n.Position.X, n.Position.Y, n.Position.Z, n.Speed, n.Curvature, n.Offset, n.Acceleration, n.Station}
 		row := make([]string, len(values))
 		for i, v := range values {
 			row[i] = strconv.FormatFloat(v, 'f', 6, 64)

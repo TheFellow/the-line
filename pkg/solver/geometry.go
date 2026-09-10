@@ -26,17 +26,17 @@ func (e evaluator) geometry(offset []float64) ([]pathState, error) {
 	curves[0] = curves[1]
 	curves[n-1] = curves[n-2]
 	path := make([]pathState, 0, 2*n)
-	add := func(p track.Vec3, k, o, bank, grip float64) {
+	add := func(p track.Vec3, station, k, o, bank, grip float64) {
 		s := 0.
 		if len(path) > 0 {
 			prev := path[len(path)-1].node
 			s = prev.S + distance(prev.Position, p)
 		}
-		path = append(path, pathState{node: Node{Position: p, S: s, Curvature: k, Offset: o}, bank: bank, grip: grip})
+		path = append(path, pathState{node: Node{Position: p, S: s, Station: station, Curvature: k, Offset: o}, bank: bank, grip: grip})
 	}
 	for i := 0; i < n; i++ {
 		s := e.road[i]
-		add(points[i], curves[i], offset[i], s.Bank, s.Grip)
+		add(points[i], s.S, curves[i], offset[i], s.Bank, s.Grip)
 		if i == n-1 {
 			break
 		}
@@ -73,7 +73,7 @@ func (e evaluator) geometry(offset []float64) ([]pathState, error) {
 			if t > 1e-6 && t < 1-1e-6 && u >= 0 && u <= 1 {
 				v := mix(p, q, t)
 				v.Z = lerp(d0.Z, d1.Z, u)
-				add(v, lerp(curves[i], curves[i+1], t), lerp(offset[i], offset[i+1], t), lerp(a.Bank, b.Bank, t), a.Grip)
+				add(v, lerp(a.S, b.S, t), lerp(curves[i], curves[i+1], t), lerp(offset[i], offset[i+1], t), lerp(a.Bank, b.Bank, t), a.Grip)
 			}
 		}
 	}
