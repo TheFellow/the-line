@@ -1,5 +1,7 @@
 # Next steps: from a corner viewer to a line-and-setup laboratory
 
+Implementation status: see [the roadmap release record](../docs/ROADMAP_RELEASES.md) for delivered features, measured validation and unmet targets. The proposal below is preserved as the original review.
+
 Reviewed 2026-09-10 against commit `77f5d7c` (camera and reference-analysis release). This document records what the studio does today, what a sim racer and a car enthusiast still cannot do with it, and a prioritized sequence of releases that close that gap. It is written to be consumed by the same iterative process that produced `docs/ENTHUSIAST_REVIEW.md`: each iteration has a motivation, a design that fits the existing Go structure, and acceptance evidence. Nothing below is implemented; measured numbers refer only to the current code.
 
 The product goal used for every judgement: **let the user experiment with different lines and different car setups at the edge of adhesion, and see honestly where time is gained or lost.**
