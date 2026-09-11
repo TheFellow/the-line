@@ -20,8 +20,7 @@ type Options struct {
 	// Workers bounds independent fine-candidate evaluations (0: up to four).
 	// Browser builds and replacement models always evaluate sequentially.
 	Workers int
-	// Polish adds 0–3 bounded smaller-amplitude local sweeps. Zero preserves
-	// the established search sequence and its recorded fixture results.
+	// Polish adds 0–3 smaller-amplitude sweeps after the final-resolution search.
 	Polish int
 }
 
@@ -50,13 +49,15 @@ type Node struct {
 
 type Result struct {
 	Closed bool `json:"closed,omitempty"`
-	// RefinementDifference is signed percent change of the selected line from
-	// coarse to fine evaluation; a measured agreement, not a probability.
+	// RefinementDifference measures the coarse-to-fine change of the starting
+	// line, before final-resolution optimization (BeforeRefineDuration).
 	RefinementDifference   float64 `json:"refinement_difference_percent"`
 	SelectedCoarseDuration float64 `json:"selected_coarse_duration"`
 	FineCandidates         int     `json:"fine_candidates"`
 	SearchWorkers          int     `json:"search_workers"`
 	PolishCandidates       int     `json:"polish_candidates"`
+	RefineCandidates       int     `json:"refine_candidates"`
+	BeforeRefineDuration   float64 `json:"before_refine_duration"`
 	model                  vehicle.Model
 	Nodes                  []Node `json:"nodes"`
 	// Offsets are lateral offsets on Road; use Spacing to evaluate them exactly.
@@ -91,6 +92,43 @@ func Solve(scene track.Scene, model vehicle.Model, opts Options) (Result, error)
 
 // SolveContext cancels between bounded numerical work units.
 func SolveContext(ctx context.Context, scene track.Scene, model vehicle.Model, opts Options) (Result, error) {
+	result, err := solveCoarseContext(ctx, scene, model, opts)
+	if err != nil {
+		return Result{}, err
+	}
+	result.BeforeRefineDuration = result.Duration
+	if opts.Iterations == 0 && opts.Polish == 0 {
+		return result, nil
+	}
+	clearance := model.Parameters().Width/2 + opts.Margin
+	eval := evaluator{ctx: ctx, road: result.Road, model: model, entry: scene.EntrySpeed, exit: scene.ExitSpeed, clearance: clearance, edges: indexRoadEdges(result.Road, clearance)}
+	refined, count, err := refineLine(eval, result, 2*opts.Iterations, opts.Workers)
+	if err != nil {
+		return Result{}, err
+	}
+	result.RefineCandidates = count
+	result.Candidates += count
+	if count > 0 {
+		result.SearchWorkers = searchWorkers(model, opts.Workers, 96)
+		result.Termination += "; fine search budget exhausted"
+	}
+	if opts.Polish > 0 {
+		refined, count, err = polishLine(eval, refined, opts.Polish)
+		if err != nil {
+			return Result{}, err
+		}
+		result.PolishCandidates = count
+		result.Candidates += count
+		result.Termination += "; local polish budget exhausted"
+	}
+	result.Nodes, result.Offsets = refined.Nodes, refined.Offsets
+	result.Duration, result.Length, result.MaxForceResidual = refined.Duration, refined.Length, refined.MaxForceResidual
+	return result, nil
+}
+
+// The coarse stage provides a starting line. Its historical fixture timings
+// remain independently testable while the final-resolution search improves it.
+func solveCoarseContext(ctx context.Context, scene track.Scene, model vehicle.Model, opts Options) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
@@ -233,35 +271,6 @@ func SolveContext(ctx context.Context, scene track.Scene, model vehicle.Model, o
 		completed++
 		// A smaller next sweep can improve even when the current amplitude cannot.
 	}
-	polishCandidates := 0
-	prePolishIncumbents := len(incumbents)
-	for sweep := 0; sweep < opts.Polish; sweep++ {
-		for j := 0; j <= 16; j++ {
-			if err := ctx.Err(); err != nil {
-				return Result{}, err
-			}
-			center := float64(j) * road[n-1].S / 16
-			radius := road[n-1].S / 16 * 1.35
-			for _, sign := range []float64{-1, 1} {
-				candidate := append([]float64(nil), offsets...)
-				for i := range candidate {
-					delta := math.Abs(road[i].S - center)
-					if scene.Closed {
-						delta = math.Min(delta, road[n-1].S-delta)
-					}
-					if u := delta / radius; u < 1 {
-						latent := math.Atanh(clamp((candidate[i]-centers[i])/bounds[i], -.999, .999))
-						candidate[i] = centers[i] + bounds[i]*math.Tanh(latent+sign*.08*math.Pow(.5, float64(sweep))*(1+math.Cos(math.Pi*u))/2)
-					}
-				}
-				if scene.Closed {
-					candidate[n-1] = candidate[0]
-				}
-				accept(candidate)
-				polishCandidates++
-			}
-		}
-	}
 	coarseBaselineDuration := baseline.Duration
 	coarseDuration := best.Duration
 	selectedCoarseDuration := best.Duration
@@ -288,12 +297,7 @@ func SolveContext(ctx context.Context, scene track.Scene, model vehicle.Model, o
 		// Coarse winners can exchange rank after curvature refinement. Retain a
 		// bounded, evenly spaced history so an optimistic late winner cannot
 		// discard an earlier physically faster line.
-		indices := shortlistIndices(prePolishIncumbents, 16)
-		// Preserve every unpolished finalist. A polish cannot discard a
-		// previously faster fine result merely by changing shortlist spacing.
-		for _, index := range shortlistIndices(len(incumbents)-prePolishIncumbents, 4) {
-			indices = append(indices, prePolishIncumbents+index)
-		}
+		indices := shortlistIndices(len(incumbents), 16)
 		checks := len(indices)
 		fineOffsets := make([][]float64, checks)
 		coarseTimes := make([]float64, checks)
@@ -336,15 +340,11 @@ func SolveContext(ctx context.Context, scene track.Scene, model vehicle.Model, o
 	best.RefinementDifference = 100 * (best.Duration - selectedCoarseDuration) / best.Duration
 	best.FineCandidates = fineCandidates
 	best.SearchWorkers = searchWorkers(model, opts.Workers, fineCandidates)
-	best.PolishCandidates = polishCandidates
 	best.EntrySpeedCap = scene.EntrySpeed
 	best.ExitSpeedCap = scene.ExitSpeed
 	best.Termination = "search budget exhausted"
 	if completed < opts.Iterations || opts.Iterations == 0 {
 		best.Termination = "no improving smooth offset found"
-	}
-	if opts.Polish > 0 {
-		best.Termination += "; local polish budget exhausted"
 	}
 	return best, nil
 }

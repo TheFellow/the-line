@@ -122,8 +122,9 @@ func (r *Renderer) presentationBase(im *image.RGBA) {
 	}
 	// Keep nine rows visible so numerical search diagnostics have their own area.
 	r.text(im, x, 689, fmt.Sprintf("%d sectors · negative Δ is time gained", len(sectors)), 11, muted, false)
-	r.text(im, x, 706, fmt.Sprintf("%d candidates · %d fine · %d workers", r.result.Candidates, r.result.FineCandidates, r.result.SearchWorkers), 11, muted, false)
-	r.text(im, x, 723, fmt.Sprintf("Same-line coarse / fine: %+.3f%%", r.result.RefinementDifference), 11, muted, false)
+	fineCandidates := r.result.FineCandidates + r.result.RefineCandidates + r.result.PolishCandidates
+	r.text(im, x, 706, fmt.Sprintf("%d candidates · %d fine · %d workers", r.result.Candidates, fineCandidates, r.result.SearchWorkers), 11, muted, false)
+	r.text(im, x, 723, fmt.Sprintf("Final search gained %.3f s", r.result.BeforeRefineDuration-r.result.Duration), 11, muted, false)
 	r.button(im, "polish", image.Rect(x, 732, x+280, 757), "REFINE CURRENT LINE", false)
 	r.text(im, x, 777, truncate(r.result.Termination, 45), 11, muted, false)
 }

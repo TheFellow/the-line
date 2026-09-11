@@ -1,6 +1,7 @@
 package solver
 
 import (
+	"context"
 	"math"
 	"testing"
 )
@@ -8,8 +9,10 @@ import (
 // These values were independently captured by running the five original
 // fixtures from an isolated git archive of 6620b93, before the once-over fixes,
 // with each scene's default vehicle and DefaultOptions. They protect actual
-// legacy solve results, not just the optional-dynamics feature gate. Deliberate
-// numerical changes need an explained baseline update, not regenerated goldens.
+// legacy coarse-stage results, not just the optional-dynamics feature gate.
+// The default solver now improves this starting line at final resolution;
+// keeping these exact values checks that this search change did not alter the
+// vehicle physics or the original objective. Do not regenerate these goldens.
 func TestLegacyPresetDurations(t *testing.T) {
 	for _, tt := range []struct {
 		name             string
@@ -23,7 +26,7 @@ func TestLegacyPresetDurations(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			scene, car := fixture(t, tt.name)
-			result, err := Solve(scene, car, DefaultOptions())
+			result, err := solveCoarseContext(context.Background(), scene, car, DefaultOptions())
 			if err != nil {
 				t.Fatal(err)
 			}

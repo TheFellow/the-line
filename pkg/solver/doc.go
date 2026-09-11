@@ -15,7 +15,12 @@
 // are compared again on a road sampled at min(Spacing, 0.5) metres. Result.Spacing
 // reports this final resolution, SearchSpacing the provisional search resolution,
 // and CoarseDuration the lowest provisional time. The best feasible refined line
-// survives, with the refined centreline available as a fallback. A natural cubic
+// supplies a starting point for continued optimization at the final resolution.
+// Independent local polls and combined changes coordinate adjacent corners;
+// every accepted step passes the same evaluator used for authored lines. Two
+// final-search rounds run per requested iteration. BeforeRefineDuration records
+// the starting line's fine time; RefineCandidates counts these extra evaluations.
+// The starting line and refined centreline remain fallbacks. A natural cubic
 // interpolation of bounded lateral controls supplies the refined geometry before
 // any final forces, speeds, or times are computed; output is never smoothed after
 // validation. Tests measure fixed-line 0.5-to-0.25-metre changes against a declared

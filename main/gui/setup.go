@@ -193,6 +193,7 @@ func (g *game) startSolve(rollback func(), progressive bool) {
 				r.FineCandidates = search.FineCandidates
 				r.SearchWorkers = search.SearchWorkers
 				r.PolishCandidates = search.PolishCandidates
+				r.RefineCandidates = search.RefineCandidates
 				r.Termination = "retained faster verified current line"
 			}
 			err = nil
