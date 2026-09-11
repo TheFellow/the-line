@@ -2,6 +2,70 @@
 
 Measured on 2026-09-09 with Go 1.24.0, macOS/amd64, Intel Core i5-1038NG7. All values refer to the implemented synthetic, quasi-static vehicle model, not real-car measurements.
 
+## Final-resolution line search (2026-09-10)
+
+The optimizer now continues searching after the coarse shortlist is evaluated
+on the final road. This addresses feasible authored edits beating a line that
+had only been searched at 3 m. Default search adds three broad and five local
+rounds at 0.5 m, testing coordinated changes as well as individual offsets.
+The old exact coarse-stage golden values are retained to check that the vehicle
+model and original time calculation have not changed.
+
+| Fixture / car | Previous search (s) | New default (s) | Gain (s) | Same final line at 0.25 m (s) |
+| --- | ---: | ---: | ---: | ---: |
+| Club Loop / road | 23.077485 | 22.806499 | 0.270986 | 22.804372 |
+| Club Loop / GT | 19.332560 | 19.217117 | 0.115443 | 19.215658 |
+| Chicane / default car | 10.495443 | 10.361734 | 0.133709 | 10.359346 |
+| Modified closed chicane / GT | 22.503515 | 22.328026 | 0.175489 | 22.323761 |
+
+The closed-chicane fixture moves Club Loop's second geometry control inward by
+50 m. All comparisons use identical geometry, car, clearance and boundary
+conditions within each row. Fixed-line refinement changes are below 0.024% in
+this set; this measures numerical agreement, not real-car accuracy.
+
+`TestClubLoopResistsIndependentEdits` challenges each finished Club Loop line
+with physical cosine offsets of ±0.2 m at 32 stations and actual authoring-cubic
+single/paired handle movements of ±0.5 m. These differ from the optimizer's
+polynomial perturbations in latent coordinates. Each car has 120 feasible
+challengers. The largest remaining measured gains are 0.005287 s for the road
+car and 0.002441 s for the GT, below the 0.01 s regression threshold. The
+pre-fix road-car probe found a 0.055594 s gain from one small adjustment.
+These checks establish improvement and resistance to this edit family, not a
+proof of global optimality.
+
+A separate probe of the modified closed chicane found a maximum 0.007118 s
+gain from its local cosine edits. Independently integrating that edited
+trajectory's represented speed profile agrees with its reported duration to
+less than 0.000001 s.
+
+Same-line direct evaluation reproduces each optimized duration exactly.
+Cancellation during the final search preserves its input trajectory. Additional
+polish starts after the complete default search and retains its faster result.
+The editor shows a verified provisional centreline while its initial search
+runs; analysis reports the gain from final-resolution optimization.
+
+Validation of this change: `go test ./...`, `go vet ./...`, and `make build`
+passed. The full solver package completed in 573.856 s. Focused race-detector
+checks passed for concurrent solves, deterministic candidate consumption, and
+cancellation joining active workers. Both Club Loop CLI views were rendered
+and visually inspected under `artifacts/line-diagnosis/`.
+
+The actual Ebitengine browser presentation checks passed in both elevated-retina
+and plan views (four checks each); both search-diagnostics captures were
+visually inspected. Each view evaluated 464 final-search candidates plus 34
+polish candidates, retaining the faster input and producing the identical
+10.075016555 s trajectory. Evidence is in `artifacts/browser-presentation/`.
+The full `make verify-headless` run passed interaction, analysis, setup undo,
+and rapid-edit checks before reaching its former 120 s timeout during a custom
+axle-setup solve, with no browser errors and the provisional line still active.
+Its report is retained in `artifacts/browser/report.json`; it is not a full-suite
+pass. The browser wait allowance is now 300 s for the larger production search
+budget; numerical and interaction assertions are unchanged.
+With that allowance, the focused elevated-retina setup rerun passed all three
+checks: setup edit/undo/redo, superseding rapid changes, and axle setup with
+saved-car reload. Its report and inspected axle capture are retained in
+`artifacts/browser-setup/`. The complete all-scopes suite was not rerun.
+
 ## Build and headless operation
 
 - `make build`: both executable binaries built successfully.
@@ -10,9 +74,9 @@ Measured on 2026-09-09 with Go 1.24.0, macOS/amd64, Intel Core i5-1038NG7. All v
 - `CGO_ENABLED=0 go build -o bin/the-line-headless ./main/cli`: passed. The CLI has no graphics-driver initialization or native game-engine requirement.
 - CLI creation → validation → JSON/CSV solve → PNG in both views → timed GIF passed in `internal/cli`. Failed exports preserve existing files.
 
-## Solver results — C2 roads, 2026-09-10
+## Historical coarse-stage results — C2 roads, 2026-09-10
 
-Default vehicle for each scene, 3 m search spacing, 0.5 m final validation spacing, four search sweeps, 0.25 m additional clearance:
+Before the final-resolution search above: default vehicle for each scene, 3 m search spacing, 0.5 m final validation spacing, four search sweeps, 0.25 m additional clearance:
 
 | Sequence | Centreline | Verified line | Improvement | Same-path 0.5 → 0.25 m time change |
 | --- | ---: | ---: | ---: | ---: |

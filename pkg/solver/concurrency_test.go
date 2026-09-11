@@ -146,6 +146,18 @@ func TestDistinctFinalistBatchMatchesSerial(t *testing.T) {
 	eval, offsets := finalistFixture(t)
 	serial := evaluateCandidates(context.Background(), eval, offsets, 1)
 	parallel := evaluateCandidates(context.Background(), eval, offsets, 4)
+	streamed := make([]candidateEvaluation, len(offsets))
+	next := 0
+	visitCandidates(eval, offsets, 4, func(index int, result candidateEvaluation) {
+		if index != next {
+			t.Errorf("streamed result %d, expected %d", index, next)
+		}
+		streamed[index] = result
+		next++
+	})
+	if next != len(offsets) {
+		t.Fatal("stream dropped candidates")
+	}
 	durations := make(map[float64]bool)
 	for i, want := range serial {
 		got := parallel[i]
@@ -155,9 +167,45 @@ func TestDistinctFinalistBatchMatchesSerial(t *testing.T) {
 		if want.result.Duration != got.result.Duration || !reflect.DeepEqual(want.result.Nodes, got.result.Nodes) {
 			t.Fatalf("candidate %d changed under parallel evaluation", i)
 		}
+		if streamed[i].err != nil || !reflect.DeepEqual(want.result.Nodes, streamed[i].result.Nodes) {
+			t.Fatalf("streamed candidate %d changed", i)
+		}
 		durations[want.result.Duration] = true
 	}
 	if len(durations) != len(offsets) {
 		t.Fatalf("fixture only exercises %d distinct durations for %d candidates", len(durations), len(offsets))
+	}
+}
+
+func TestWindowedPollCancellationJoinsWorkers(t *testing.T) {
+	eval, offsets := finalistFixture(t)
+	if searchWorkers(eval.model, 4, len(offsets)) != 4 {
+		t.Skip("four workers unavailable")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	gate := &gatedEvaluationContext{Context: ctx, started: make(chan struct{}, 4), release: make(chan struct{})}
+	var release sync.Once
+	cleanup := func() { cancel(); release.Do(func() { close(gate.release) }) }
+	defer cleanup()
+	eval.ctx = gate
+	done := make(chan struct{})
+	go func() {
+		visitCandidates(eval, offsets, 4, func(int, candidateEvaluation) { t.Error("gated cancelled candidate was published") })
+		close(done)
+	}()
+	timeout := time.NewTimer(10 * time.Second)
+	defer timeout.Stop()
+	for range 4 {
+		select {
+		case <-gate.started:
+		case <-timeout.C:
+			t.Fatal("poll workers did not start")
+		}
+	}
+	cleanup()
+	select {
+	case <-done:
+	case <-timeout.C:
+		t.Fatal("poll workers did not stop after cancellation")
 	}
 }

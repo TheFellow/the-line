@@ -159,7 +159,14 @@ func main() {
 	}
 	v = ed.Vehicle()
 
-	result, err := solver.Solve(s, v, solver.DefaultOptions())
+	initialOpts := solver.DefaultOptions()
+	backgroundSolve := o.mode == "qualifying" && o.raceFile == ""
+	if backgroundSolve {
+		// Show a verified baseline promptly; the full search runs while the
+		// event loop can paint, play the current run, and accept cancellation.
+		initialOpts.Iterations = 0
+	}
+	result, err := solver.Solve(s, v, initialOpts)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -211,6 +218,11 @@ func main() {
 	}
 	g.texture = ebiten.NewImage(o.width, o.height)
 	attachInspection(g)
+	if backgroundSolve && !activeManual(s) {
+		g.startSolve(nil, false)
+		g.provisional = true
+		g.setStatus("Optimizing the line… showing the verified centreline")
+	}
 	ebiten.SetWindowSize(o.width, o.height)
 	ebiten.SetWindowTitle("The Line · Racing geometry studio")
 	if o.demo {
@@ -221,6 +233,9 @@ func main() {
 	// Finite runs also progress when the automation window loses focus.
 	ebiten.SetRunnableOnUnfocused(true)
 	runErr := ebiten.RunGameWithOptions(g, &ebiten.RunGameOptions{InitUnfocused: o.demo})
+	if g.cancelSolve != nil {
+		g.cancelSolve()
+	}
 	if errors.Is(runErr, ebiten.Termination) {
 		runErr = nil
 	}

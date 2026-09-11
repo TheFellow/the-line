@@ -127,7 +127,9 @@ async function wait(page, predicate, label) {
         return text && eval("(" + source + ")")(JSON.parse(text));
       },
       source,
-      { timeout: 120000, polling: 50 },
+      // Full-resolution optimization runs serially in WASM while software
+      // rendering shares the same event loop. Allow the complete search budget.
+      { timeout: 300000, polling: 50 },
     )
     .catch(async (e) => {
       const snapshot = await state(page);

@@ -110,6 +110,9 @@ func inspectFrame(g *game) {
 		race = &raceSnapshot{g.race.Config, g.race.At(g.clock), g.race.Events, g.race.MinClearance, g.race.Cars[0].Radius}
 	}
 	data := struct {
+		RefineCandidates     int     `json:"refineCandidates"`
+		BeforeRefineDuration float64 `json:"beforeRefineDuration"`
+
 		Race              *raceSnapshot        `json:"race"`
 		PolishCandidates  int                  `json:"polishCandidates"`
 		Analysis          bool                 `json:"analysis"`
@@ -183,6 +186,9 @@ func inspectFrame(g *game) {
 		EndNode           solver.Node          `json:"endNode"`
 		CenterEndNode     solver.Node          `json:"centerEndNode"`
 	}{
+		RefineCandidates:     g.result.RefineCandidates,
+		BeforeRefineDuration: g.result.BeforeRefineDuration,
+
 		Race: race, Analysis: g.renderer.Analysis(), Sectors: g.renderer.Sectors(), Closed: g.result.Closed, StartNode: g.result.Nodes[0], SetupPage: g.setupPage, AuthoringOpen: g.authoringOpen,
 		LineColor: string(g.renderer.LineColorMode()), ChartChannel: string(g.renderer.ChartChannel()),
 		PolishCandidates: g.result.PolishCandidates,

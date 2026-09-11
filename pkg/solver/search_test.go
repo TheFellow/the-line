@@ -21,8 +21,14 @@ func TestSearchWorkersPreserveFixtureTrajectories(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			scene, car := fixture(t, name)
 			opts := DefaultOptions()
+			// One full-budget fixture exercises every final-search round. The
+			// other geometries need both search scales, not repeated long solves.
+			// Default-budget quality on every preset is checked separately.
+			if name != "esses" {
+				opts.Iterations = 1
+			}
 			opts.Workers = 1
-			sequential, err := Solve(scene, unpreparedModel{car}, opts)
+			sequential, err := Solve(scene, car, opts)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -32,7 +38,17 @@ func TestSearchWorkersPreserveFixtureTrajectories(t *testing.T) {
 				t.Fatal(err)
 			}
 			if !reflect.DeepEqual(sequential.Nodes, concurrent.Nodes) || !reflect.DeepEqual(sequential.CenterNodes, concurrent.CenterNodes) || !reflect.DeepEqual(sequential.Offsets, concurrent.Offsets) || sequential.Duration != concurrent.Duration || sequential.Candidates != concurrent.Candidates {
-				t.Fatal("prepared/concurrent evaluation changed the sequential fixture")
+				t.Fatal("concurrent evaluation changed the sequential fixture")
+			}
+			// Verify the general envelope on the complete final trajectory. Worker
+			// determinism above uses the built-in model in both runs, so a much
+			// slower custom envelope need not repeat hundreds of search probes.
+			general, err := Evaluate(scene, unpreparedModel{car}, sequential.Offsets, Options{Spacing: sequential.Spacing, Margin: opts.Margin})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(general.Nodes, sequential.Nodes) || !reflect.DeepEqual(general.CenterNodes, sequential.CenterNodes) {
+				t.Fatal("prepared evaluation changed the general-envelope trajectory")
 			}
 			t.Logf("%s unchanged %.12f s, %d finalists", name, concurrent.Duration, concurrent.FineCandidates)
 		})

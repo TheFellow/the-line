@@ -106,6 +106,7 @@ func EvaluateContext(ctx context.Context, scene track.Scene, model vehicle.Model
 	result.SearchSpacing = opts.Spacing
 	result.CoarseDuration = result.Duration
 	result.SelectedCoarseDuration = result.Duration
+	result.BeforeRefineDuration = result.Duration
 	result.SearchWorkers = 1
 	result.Termination = "supplied line evaluated; no search"
 	result.Candidates = 2
